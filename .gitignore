@@ -1,0 +1,12 @@
+/target/
+*.exe
+*.log
+*.png
+/backup*/
+/preview-*/
+/launcher-preview/
+/screens*/
+PROGRESS.md
+state.json
+config.json
+.env
