@@ -44,15 +44,22 @@ pub struct Config {
     pub terminal: String,
     /// "custom" seçiliyse programın tam yolu.
     pub terminal_custom: String,
+    /// Arayüz dili: "tr" ya da "en". Boşsa Windows arayüz diline göre seçilir (Türkçe değilse English).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub lang: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { hotkey: Hotkey::default(), autostart: true, terminal: "auto".into(), terminal_custom: String::new() }
+        Config { hotkey: Hotkey::default(), autostart: true, terminal: "auto".into(), terminal_custom: String::new(), lang: String::new() }
     }
 }
 
 impl Config {
+    /// Geçerli arayüz dili (kayıtlı ayar ya da sistem varsayılanı).
+    pub fn ui_lang(&self) -> crate::i18n::Lang {
+        crate::i18n::Lang::from_code(&self.lang).unwrap_or_else(crate::i18n::system_default)
+    }
     fn file() -> PathBuf {
         crate::util::data_dir().join("config.json")
     }
@@ -145,5 +152,8 @@ mod tests {
         assert_eq!(c.hotkey.vk, VK_F9);
         let back: Config = serde_json::from_str(&serde_json::to_string(&Config { terminal: "hyper".into(), ..Default::default() }).unwrap()).unwrap();
         assert_eq!(back.terminal, "hyper");
+        assert!(c.lang.is_empty(), "eski ayarlarda dil yok: sistem varsayılanı kullanılır");
+        let back: Config = serde_json::from_str(&serde_json::to_string(&Config { lang: "en".into(), ..Default::default() }).unwrap()).unwrap();
+        assert_eq!(back.ui_lang(), crate::i18n::Lang::En);
     }
 }

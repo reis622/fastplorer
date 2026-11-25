@@ -171,14 +171,14 @@ pub fn remove(alias: &str) -> std::io::Result<()> {
     let f = file_of(alias);
     let c = std::fs::read_to_string(&f)?;
     if parse_target(&c).is_none() {
-        return Err(std::io::Error::other("Bu dosya Fastplorer tarafından oluşturulmamış"));
+        return Err(std::io::Error::other(t!("Bu dosya Fastplorer tarafından oluşturulmamış", "This file was not created by Fastplorer")));
     }
     std::fs::remove_file(f)
 }
 
 pub fn rename(old: &str, new: &str) -> std::io::Result<()> {
     if exists(new) && !old.eq_ignore_ascii_case(new) {
-        return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "Bu ad zaten kullanılıyor"));
+        return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, t!("Bu ad zaten kullanılıyor", "This name is already in use")));
     }
     std::fs::rename(file_of(old), file_of(new))
 }
@@ -258,7 +258,7 @@ pub fn add_to_path() -> Result<(), String> {
     let d = bin_dir().to_string_lossy().to_string();
     #[cfg(windows)]
     {
-        let (cur, ty) = reg::read_user_path().ok_or("PATH okunamadı")?;
+        let (cur, ty) = reg::read_user_path().ok_or(t!("PATH okunamadı", "Could not read PATH"))?;
         if path_has(&d, &cur) {
             return Ok(());
         }
@@ -269,11 +269,11 @@ pub fn add_to_path() -> Result<(), String> {
         } else {
             format!("{cur};{d}")
         };
-        if reg::write_user_path(&nv, ty) { Ok(()) } else { Err("PATH yazılamadı".into()) }
+        if reg::write_user_path(&nv, ty) { Ok(()) } else { Err(t!("PATH yazılamadı", "Could not write PATH").into()) }
     }
     #[cfg(not(windows))]
     {
-        Err(format!("Bu sistemde PATH'e elle ekleyin: {d}"))
+        Err(tf!("Bu sistemde PATH'e elle ekleyin: {d}", "On this system add it to PATH manually: {d}"))
     }
 }
 

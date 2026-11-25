@@ -124,6 +124,7 @@ fn run_child(name: &str) {
         .env("BUL_RECYCLE_DIRS", base.join("kutu"))
         .env("BUL_DESKTOP", root.join("Masaüstü"))
         .env_remove("BUL_NOHIDE")
+        .env_remove("BUL_LANG")
         .output()
         .unwrap();
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -718,7 +719,7 @@ scenario!(recycle_bin_browse_and_restore, recycle_bin_browse_and_restore_child, 
     let desk = h.dir("Masaüstü");
     h.app.enter_browse(&desk);
     h.wait("masaüstü", |a| !a.waiting && a.items.len() == 2);
-    assert_eq!(h.app.items[0].name, crate::recycle::TITLE);
+    assert_eq!(h.app.items[0].name, crate::recycle::title());
     // sanal öğede kopyalama/silme/ad değiştirme yok
     assert!(h.app.targets().is_empty());
     h.key(Key::F2, Modifiers::NONE);
@@ -761,3 +762,200 @@ scenario!(recycle_bin_browse_and_restore, recycle_bin_browse_and_restore_child, 
     assert_eq!(h.app.browse.as_deref(), Some(desk.as_str()));
 });
 
+
+/// Çizilen tüm metinler (iç içe şekiller dahil).
+fn shape_texts(out: &egui::FullOutput) -> Vec<String> {
+    fn walk(s: &egui::Shape, v: &mut Vec<String>) {
+        match s {
+            egui::Shape::Text(t) => v.push(t.galley.job.text.clone()),
+            egui::Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, v)),
+            _ => {}
+        }
+    }
+    let mut v = Vec::new();
+    for c in &out.shapes {
+        walk(&c.shape, &mut v);
+    }
+    v
+}
+
+fn menu_keys_unique_ascii(m: &[MEntry], what: &str) {
+    let mut k: Vec<char> = m.iter().filter_map(|e| if let MEntry::Item(i) = e { Some(i.key) } else { None }).collect();
+    assert!(k.iter().all(|c| *c == ' ' || c.is_ascii_lowercase()), "{what}: harfler a-z olmalı: {k:?}");
+    let n = k.len();
+    k.sort();
+    k.dedup();
+    assert_eq!(k.len(), n, "{what}: yinelenen harf: {:?}", labels(m));
+}
+
+scenario!(language_setting_switches_immediately, language_setting_switches_immediately_child, |h| {
+    assert_eq!(crate::i18n::get(), crate::i18n::Lang::Tr, "testler Türkçe başlar");
+    h.key(Key::S, ctrl());
+    assert_eq!(h.app.mode, Mode::Settings);
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "Dil / Language") && t.iter().any(|s| s == "Türkçe"), "ayarlarda dil satırı: {t:?}");
+    for _ in 0..3 {
+        h.key(Key::ArrowDown, Modifiers::NONE);
+    }
+    assert_eq!(h.app.settings_sel, 3);
+    h.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(crate::i18n::get(), crate::i18n::Lang::En, "Enter dili değiştirir");
+    assert_eq!(crate::config::Config::load().0.lang, "en", "dil ayarı kaydedilir");
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "English") && t.iter().any(|s| s == "Global shortcut") && t.iter().any(|s| s == "Start with Windows"), "ayarlar hemen İngilizce: {t:?}");
+    h.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(h.app.mode, Mode::Search);
+    // menüler: İngilizce etiketler, a-z harfler tekil, Tab→Enter hâlâ Kopyala
+    let d = h.dir("Liste");
+    h.app.enter_browse(&d);
+    h.wait("liste", |a| a.items.len() == 6 && !a.waiting);
+    for multi in [false, true] {
+        h.app.multi = multi;
+        let (tab, cm) = (h.app.tab_menu(), h.app.context_menu());
+        menu_keys_unique_ascii(&tab, "Tab");
+        menu_keys_unique_ascii(&cm, "sağ tık");
+        let ca = acts(&cm);
+        assert!(acts(&tab).iter().all(|a| ca.contains(a)), "sağ tık Tab'ın her şeyini içerir");
+        assert_eq!(&labels(&cm)[..3], ["Open", "Preview", "Show in Explorer"]);
+        assert!(labels(&tab).contains(&"Copy") && labels(&tab).contains(&"Move to Recycle Bin"));
+    }
+    h.app.multi = false;
+    assert_eq!(labels(&h.app.tab_menu())[0], "Multi-select");
+    h.key(Key::Tab, Modifiers::NONE);
+    assert_eq!(h.app.menu.as_ref().and_then(|m| m.item(m.sel)).map(|i| i.act), Some(Act::Copy));
+    // harfle seçim İngilizce harflerle: f = Recent folders
+    h.frame(vec![Event::Text("f".into())]);
+    h.frame(vec![]);
+    assert_eq!(h.app.mode, Mode::Dests, "İngilizcede f → Recent folders");
+    h.key(Key::Escape, Modifiers::NONE);
+    // Bin menüleri (boş ve dolu) ve Geri Dönüşüm Kutusu menüsü
+    h.app.run(Act::BinMgr, &h.ctx.clone());
+    h.wait("boş Bin", |a| a.mode == Mode::Bin && a.items.is_empty());
+    menu_keys_unique_ascii(&h.app.tab_menu(), "boş Bin");
+    menu_keys_unique_ascii(&h.app.context_menu(), "boş Bin sağ tık");
+    crate::bin::add("rapor", &h.dir("Belgeler/rapor.pdf")).unwrap();
+    h.app.research();
+    h.wait("dolu Bin", |a| !a.items.is_empty());
+    menu_keys_unique_ascii(&h.app.tab_menu(), "Bin");
+    menu_keys_unique_ascii(&h.app.context_menu(), "Bin sağ tık");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.app.leave_browse();
+    h.frame(vec![Event::Text("recycle".into())]);
+    h.wait("sanal öğe", |a| a.items.first().is_some_and(|i| i.path == crate::recycle::VIRTUAL_PATH));
+    assert_eq!(h.app.items[0].name, "Recycle Bin");
+    h.key(Key::Enter, Modifiers::NONE);
+    h.wait("kutu", |a| a.mode == Mode::Trash && a.items.len() == 3);
+    let tm = h.app.tab_menu();
+    menu_keys_unique_ascii(&tm, "kutu");
+    assert_eq!(labels(&tm)[0], "Restore");
+    assert!(tm.iter().any(|e| matches!(e, MEntry::Item(i) if i.key == 'r' && i.act == Act::Restore)), "İngilizcede r = Restore");
+    h.key(Key::Escape, Modifiers::NONE);
+    // geri Türkçe: Sol/Sağ da değiştirir
+    h.key(Key::S, ctrl());
+    for _ in 0..3 {
+        h.key(Key::ArrowDown, Modifiers::NONE);
+    }
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(crate::i18n::get(), crate::i18n::Lang::Tr);
+    assert_eq!(crate::config::Config::load().0.lang, "tr");
+    h.key(Key::Escape, Modifiers::NONE);
+    assert_eq!(labels(&h.app.context_menu())[0], "Aç", "Türkçe geri geldi");
+});
+
+scenario!(english_ui_has_no_turkish_left, english_ui_has_no_turkish_left_child, |h| {
+    h.app.toggle_lang();
+    assert_eq!(crate::i18n::get(), crate::i18n::Lang::En);
+    h.app.toast = None;
+    // dosya/klasör adları (test verisi) Türkçe olabilir: onları içeren metinler sayılmaz
+    const FIXTURE: [&str; 21] = ["kök", "masaüstü", "kısayol", "belgeler", "notlar", "resimler", "tatil", "kapak", "liste", "dosya", "rapor", "fatura", "makbuz", "ocak", "eski", "proje", "silinen", "ic.txt", "silinmiş", "fp-ui-", "veri"];
+    const TR_CHARS: &str = "çğıöşüÇĞİÖŞÜ";
+    const TR_WORDS: [&str; 33] = [
+        "Kopyala", "Kes", "Yeni", "Kapat", "Geri", "Ayarlar", "Uygula", "Gezgin", "Yenile", "Kaydet", "Sil", "Gir", "Bas", "ara", "ile", "ya", "da", "ve", "yok", "Tab'a", "Oca", "Nis", "Haz", "Tem", "Eyl", "Eki", "Kas", "Ara", "Tümü", "Bugün", "Dün", "önce", "satır",
+    ];
+    let mut seen = 0;
+    let mut check = |h: &mut H, what: &str| {
+        let out = h.frame(vec![]);
+        for s in shape_texts(&out) {
+            let low = s.to_lowercase();
+            if FIXTURE.iter().any(|f| low.contains(f)) {
+                continue;
+            }
+            seen += 1;
+            assert!(!s.chars().any(|c| TR_CHARS.contains(c)), "{what}: Türkçe metin kalmış: {s:?}");
+            for w in s.split(|c: char| !c.is_alphanumeric() && c != '\'') {
+                assert!(!TR_WORDS.contains(&w), "{what}: Türkçe sözcük {w:?} kalmış: {s:?}");
+            }
+        }
+    };
+    h.wait("ana liste", |a| !a.waiting && !a.items.is_empty());
+    check(h, "ana liste");
+    h.frame(vec![Event::Text("pdf".into())]);
+    h.wait("arama", |a| a.query == "pdf" && !a.items.is_empty() && !a.waiting);
+    check(h, "arama");
+    h.key(Key::F1, Modifiers::NONE);
+    check(h, "uzantı girişi");
+    h.key(Key::F1, Modifiers::NONE);
+    check(h, "içerik araması");
+    h.key(Key::F1, Modifiers::NONE);
+    h.key(Key::Escape, Modifiers::NONE);
+    let d = h.dir("Belgeler");
+    h.app.enter_browse(&d);
+    h.wait("klasör", |a| !a.waiting && !a.items.is_empty());
+    check(h, "klasör");
+    h.key(Key::Space, Modifiers::SHIFT);
+    h.wait("önizleme", |a| a.preview.as_ref().is_some_and(|p| p.key == a.pkey));
+    check(h, "önizleme");
+    h.key(Key::Space, Modifiers::SHIFT);
+    h.key(Key::Tab, Modifiers::NONE);
+    check(h, "Tab menüsü");
+    h.key(Key::Escape, Modifiers::NONE);
+    let p = pos2(200.0, 150.0);
+    h.app.open_menu(true, p);
+    check(h, "sağ tık menüsü");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::M, ctrl());
+    check(h, "çoklu seçim");
+    h.frame(vec![Event::Key { key: Key::Space, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }, Event::Text(" ".into())]);
+    check(h, "işaretli");
+    h.key(Key::M, ctrl());
+    h.app.clear_marks();
+    h.app.toast = None;
+    h.key(Key::Delete, Modifiers::NONE);
+    assert!(h.app.confirm.is_some());
+    check(h, "silme onayı");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::F2, Modifiers::NONE);
+    check(h, "yeniden adlandırma");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::N, ctrl());
+    check(h, "not");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::S, ctrl());
+    check(h, "ayarlar");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.app.run(Act::Dests, &h.ctx.clone());
+    check(h, "son hedefler");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.app.run(Act::BinMgr, &h.ctx.clone());
+    h.wait("Bin", |a| a.mode == Mode::Bin);
+    check(h, "boş Bin");
+    h.key(Key::Tab, Modifiers::NONE);
+    check(h, "boş Bin menüsü");
+    h.key(Key::Escape, Modifiers::NONE);
+    h.key(Key::Escape, Modifiers::NONE);
+    h.app.leave_browse();
+    h.frame(vec![Event::Text("trash".into())]);
+    h.wait("sanal öğe", |a| a.items.first().is_some_and(|i| i.path == crate::recycle::VIRTUAL_PATH));
+    h.app.toast = None;
+    check(h, "kutu araması");
+    h.key(Key::Enter, Modifiers::NONE);
+    h.wait("kutu", |a| a.mode == Mode::Trash && a.items.len() == 3);
+    check(h, "Geri Dönüşüm Kutusu");
+    h.key(Key::Tab, Modifiers::NONE);
+    check(h, "kutu menüsü");
+    // dile bağlı biçimler
+    assert_eq!(crate::util::fmt_count(1234567), "1,234,567");
+    assert_eq!(crate::util::fmt_size(1536), "1.5 KB");
+    assert_eq!(crate::util::fmt_when(crate::util::now_secs()), "just now");
+    assert!(seen > 40, "yeterince metin denetlenmeli ({seen})");
+});

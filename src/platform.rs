@@ -495,9 +495,9 @@ mod win {
     fn tray_menu(hwnd: HWND) {
         unsafe {
             let m = CreatePopupMenu();
-            let a = wide(&format!("Göster\t{}", hotkey_label()));
-            let s = wide("Ayarlar");
-            let b = wide("Çıkış");
+            let a = wide(&tf!("Göster\t{}", "Show\t{}", hotkey_label()));
+            let s = wide(t!("Ayarlar", "Settings"));
+            let b = wide(t!("Çıkış", "Exit"));
             AppendMenuW(m, MF_STRING, 1, a.as_ptr());
             AppendMenuW(m, MF_STRING, 3, s.as_ptr());
             AppendMenuW(m, MF_SEPARATOR, 0, std::ptr::null());
@@ -830,13 +830,13 @@ mod win {
                 let pb = std::path::Path::new(p);
                 match pb.components().next() {
                     Some(std::path::Component::Prefix(pr)) => format!("{}\\", pr.as_os_str().to_string_lossy()),
-                    _ => return Err(format!("Desteklenmeyen yol: {p}")),
+                    _ => return Err(tf!("Desteklenmeyen yol: {p}", "Unsupported path: {p}")),
                 }
             };
             let w = wide(&root);
             // 3 = DRIVE_FIXED: Geri Dönüşüm Kutusu olan tek güvenli tür
             if unsafe { GetDriveTypeW(w.as_ptr()) } != 3 {
-                return Err("Bu sürücüde Geri Dönüşüm Kutusu yok; güvenlik için silinmedi".into());
+                return Err(t!("Bu sürücüde Geri Dönüşüm Kutusu yok; güvenlik için silinmedi", "This drive has no Recycle Bin; not deleted for safety").into());
             }
         }
         // çift sıfır sonlu liste
@@ -854,10 +854,10 @@ mod win {
             op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_WANTNUKEWARNING) as u16;
             let r = SHFileOperationW(&mut op);
             if r != 0 {
-                return Err(format!("Geri Dönüşüm Kutusu'na gönderilemedi (kod {r})"));
+                return Err(tf!("Geri Dönüşüm Kutusu'na gönderilemedi (kod {r})", "Could not move to the Recycle Bin (code {r})"));
             }
             if op.fAnyOperationsAborted != 0 {
-                return Err("İşlem iptal edildi".into());
+                return Err(t!("İşlem iptal edildi", "Operation cancelled").into());
             }
         }
         Ok(())
@@ -1017,7 +1017,7 @@ pub fn recycle(paths: &[String]) -> Result<(), String> {
     #[cfg(not(windows))]
     {
         // Linux (deneme): freedesktop çöp kutusuna taşı
-        let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).ok_or("Çöp kutusu bulunamadı")?;
+        let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).ok_or(t!("Çöp kutusu bulunamadı", "Trash not found"))?;
         let files = base.join("Trash/files");
         std::fs::create_dir_all(&files).map_err(|e| e.to_string())?;
         for p in paths {
@@ -1109,7 +1109,7 @@ pub fn desktop_dir() -> Option<String> {
 /// Taşı ama hedefte bir şey varsa asla üzerine yazma (Windows: MoveFileExW bayraksız).
 pub fn move_no_replace(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
     if std::fs::symlink_metadata(to).is_ok() {
-        return Err("hedefte aynı adlı bir öğe var".into());
+        return Err(t!("hedefte aynı adlı bir öğe var", "an item with the same name exists at the destination").into());
     }
     #[cfg(windows)]
     {
@@ -1137,7 +1137,7 @@ pub fn open_recycle_bin_in_explorer() -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        Err("Yalnızca Windows'ta".into())
+        Err(t!("Yalnızca Windows'ta", "Windows only").into())
     }
 }
 

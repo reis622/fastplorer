@@ -81,7 +81,7 @@ pub fn is_textual(name: &str) -> bool {
 
 pub fn type_label(name: &str, is_dir: bool) -> String {
     if is_dir {
-        return "Klasör".into();
+        return t!("Klasör", "Folder").into();
     }
     let e = ext_of(name);
     let l = match e.as_str() {
@@ -96,17 +96,17 @@ pub fn type_label(name: &str, is_dir: bool) -> String {
         "java" => "Java",
         "kt" | "kts" => "Kotlin",
         "md" => "Markdown",
-        "txt" => "Metin",
+        "txt" => t!("Metin", "Text"),
         "pdf" => "PDF",
-        "doc" | "docx" | "odt" | "rtf" => "Word belgesi",
-        "xls" | "xlsx" | "ods" | "csv" => "Tablo",
-        "ppt" | "pptx" | "odp" => "Sunum",
+        "doc" | "docx" | "odt" | "rtf" => t!("Word belgesi", "Word document"),
+        "xls" | "xlsx" | "ods" | "csv" => t!("Tablo", "Spreadsheet"),
+        "ppt" | "pptx" | "odp" => t!("Sunum", "Presentation"),
         _ => "",
     };
     if !l.is_empty() {
         return l.into();
     }
-    if e.is_empty() { "Dosya".into() } else { e.to_uppercase() }
+    if e.is_empty() { t!("Dosya", "File").into() } else { e.to_uppercase() }
 }
 
 /// 4,2 KB biçiminde boyut.
@@ -122,7 +122,7 @@ pub fn fmt_size(n: u64) -> String {
         u += 1;
     }
     let s = if v < 100.0 { format!("{v:.1}") } else { format!("{v:.0}") };
-    format!("{} {}", s.replace('.', ","), U[u])
+    format!("{} {}", if crate::i18n::en() { s } else { s.replace('.', ",") }, U[u])
 }
 
 /// 1.591.409 biçiminde sayı.
@@ -131,7 +131,7 @@ pub fn fmt_count(n: usize) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
         if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push('.');
+            out.push(if crate::i18n::en() { ',' } else { '.' });
         }
         out.push(c);
     }
@@ -139,6 +139,7 @@ pub fn fmt_count(n: usize) -> String {
 }
 
 const MONTHS: [&str; 12] = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+const MONTHS_EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
@@ -155,7 +156,7 @@ pub fn fmt_date(t: i64) -> String {
     }
     let Some(d) = Local.timestamp_opt(t, 0).single() else { return String::new() };
     let now = Local::now();
-    let m = MONTHS[d.month0() as usize];
+    let m = if crate::i18n::en() { MONTHS_EN[d.month0() as usize] } else { MONTHS[d.month0() as usize] };
     if d.year() == now.year() {
         format!("{:>2} {} {:02}:{:02}", d.day(), m, d.hour(), d.minute())
     } else {
@@ -169,19 +170,19 @@ pub fn fmt_when(t: i64) -> String {
     let now = now_secs();
     let diff = now - t;
     if (0..60).contains(&diff) {
-        return "az önce".into();
+        return t!("az önce", "just now").into();
     }
     if (60..3600).contains(&diff) {
-        return format!("{} dk önce", diff / 60);
+        return tf!("{} dk önce", "{} min ago", diff / 60);
     }
     let (Some(d), n) = (Local.timestamp_opt(t, 0).single(), Local::now()) else { return fmt_date(t) };
     let dd = d.date_naive();
     let nd = n.date_naive();
     if dd == nd {
-        return format!("Bugün {:02}:{:02}", d.hour(), d.minute());
+        return tf!("Bugün {:02}:{:02}", "Today {:02}:{:02}", d.hour(), d.minute());
     }
     if nd.pred_opt() == Some(dd) {
-        return format!("Dün {:02}:{:02}", d.hour(), d.minute());
+        return tf!("Dün {:02}:{:02}", "Yesterday {:02}:{:02}", d.hour(), d.minute());
     }
     fmt_date(t)
 }

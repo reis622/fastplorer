@@ -23,11 +23,13 @@ fn sb(size: f32) -> FontId {
 pub fn fmt_day(ts: i64) -> String {
     use chrono::{Datelike, Local, TimeZone};
     const M: [&str; 12] = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+    const M_EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let months = if crate::i18n::en() { M_EN } else { M };
     if ts <= 0 {
         return String::new();
     }
     match Local.timestamp_opt(ts, 0).single() {
-        Some(d) => format!("{} {} {}", d.day(), M[d.month0() as usize], d.year()),
+        Some(d) => format!("{} {} {}", d.day(), months[d.month0() as usize], d.year()),
         None => String::new(),
     }
 }
@@ -154,6 +156,20 @@ fn paint_gear(p: &Painter, c: Pos2, col: Color32) {
     }
     p.circle_stroke(c, 4.2, Stroke::new(1.5, col));
     p.circle_filled(c, 1.4, col);
+}
+
+/// Dünya simgesi (dil ayarı): daire, meridyen ve enlemler.
+fn paint_globe(p: &Painter, c: Pos2, col: Color32) {
+    let k = Stroke::new(1.3, col);
+    p.circle_stroke(c, 7.0, k);
+    p.line_segment([pos2(c.x - 7.0, c.y), pos2(c.x + 7.0, c.y)], k);
+    p.line_segment([pos2(c.x - 6.0, c.y - 3.6), pos2(c.x + 6.0, c.y - 3.6)], Stroke::new(1.0, col));
+    p.line_segment([pos2(c.x - 6.0, c.y + 3.6), pos2(c.x + 6.0, c.y + 3.6)], Stroke::new(1.0, col));
+    let pts: Vec<Pos2> = (0..=24).map(|i| {
+        let a = i as f32 / 24.0 * std::f32::consts::TAU;
+        pos2(c.x + 3.2 * a.cos(), c.y + 7.0 * a.sin())
+    }).collect();
+    p.add(egui::Shape::line(pts, k));
 }
 
 /// Terminal simgesi: çerçeve içinde ">_".
@@ -437,16 +453,16 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     // solda arama modu çipi (F1 ya da tıklama: İsim → Uzantı → İçerik)
     let mut te_left = panel.left() + 50.0;
     let mode_lab = match app.mode {
-        Mode::ExtInput { .. } => Some("Uzantı"),
-        Mode::Search if app.content_query().is_some() => Some("İçerik"),
-        Mode::Search if app.ext.is_some() => Some("Uzantı"),
-        Mode::Search => Some("İsim"),
+        Mode::ExtInput { .. } => Some((1, t!("Uzantı", "Extension"))),
+        Mode::Search if app.content_query().is_some() => Some((2, t!("İçerik", "Content"))),
+        Mode::Search if app.ext.is_some() => Some((1, t!("Uzantı", "Extension"))),
+        Mode::Search => Some((0, t!("İsim", "Name"))),
         _ => None,
     };
-    if let Some(lab) = mode_lab {
-        let (bg, bd, fgc) = match lab {
-            "İçerik" => (Color32::from_rgb(0x2a, 0x2f, 0x24), t::OK.gamma_multiply(0.6), Color32::from_rgb(0xc8, 0xe6, 0xb0)),
-            "Uzantı" => (t::accent_dim(), t::ACCENT.gamma_multiply(0.6), Color32::from_rgb(0xcf, 0xe4, 0xf7)),
+    if let Some((kind, lab)) = mode_lab {
+        let (bg, bd, fgc) = match kind {
+            2 => (Color32::from_rgb(0x2a, 0x2f, 0x24), t::OK.gamma_multiply(0.6), Color32::from_rgb(0xc8, 0xe6, 0xb0)),
+            1 => (t::accent_dim(), t::ACCENT.gamma_multiply(0.6), Color32::from_rgb(0xcf, 0xe4, 0xf7)),
             _ => (Color32::from_rgb(0x2a, 0x2d, 0x34), Color32::from_rgb(0x3a, 0x3e, 0x46), t::KEY),
         };
         let tw = text_w(&painter, lab, sb(11.5));
@@ -462,19 +478,19 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     }
     let te_rect = Rect::from_min_max(pos2(te_left, panel.top() + 14.0), pos2(chip_x - 6.0, panel.top() + 42.0));
     let hint: String = match &app.mode {
-        Mode::Dests => "Son hedeflerde ara".into(),
-        Mode::Bin => "Bin'de ara".into(),
-        Mode::Trash => "Geri Dönüşüm Kutusu'nda ara".into(),
-        Mode::Settings => "Ayarlar".into(),
-        Mode::ExtInput { .. } => "Uzantı yazın (ör. pdf) ve Enter".into(),
-        Mode::Note { .. } => "Not alınıyor · aşağıya yazın".into(),
+        Mode::Dests => t!("Son hedeflerde ara", "Search recent folders").into(),
+        Mode::Bin => t!("Bin'de ara", "Search Bin").into(),
+        Mode::Trash => t!("Geri Dönüşüm Kutusu'nda ara", "Search the Recycle Bin").into(),
+        Mode::Settings => t!("Ayarlar", "Settings").into(),
+        Mode::ExtInput { .. } => t!("Uzantı yazın (ör. pdf) ve Enter", "Type an extension (e.g. pdf) and press Enter").into(),
+        Mode::Note { .. } => t!("Not alınıyor · aşağıya yazın", "Taking a note · type below").into(),
         Mode::Search if app.content_query().is_some() => match &app.browse {
-            Some(b) => format!("{} içindeki dosyaların içeriğinde ara", crate::app::file_name(b)),
-            None => "Dosyaların içeriğinde ara".into(),
+            Some(b) => tf!("{} içindeki dosyaların içeriğinde ara", "Search inside files in {}", crate::app::file_name(b)),
+            None => t!("Dosyaların içeriğinde ara", "Search inside files").into(),
         },
         Mode::Search => match &app.browse {
-            Some(b) => format!("{} içinde ara", crate::app::file_name(b)),
-            None => "Aramak için buraya yazın".into(),
+            Some(b) => tf!("{} içinde ara", "Search in {}", crate::app::file_name(b)),
+            None => t!("Aramak için buraya yazın", "Type here to search").into(),
         },
     };
     let resp = ui.put(
@@ -523,7 +539,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
             paint_x(&painter, xc, 3.5, if xh { t::FG } else { t::TEXT3 });
             clip_x = Some(xr);
             right_limit = xr.left() - 8.0;
-            let cut = verb == "Kesildi";
+            let cut = verb == t!("Kesildi", "Cut");
             let more = if n > 1 { format!(" +{}", n - 1) } else { String::new() };
             let g = painter.layout_job(job(&format!("{name}{more}"), sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde), 200.0));
             let gw = g.size().x;
@@ -534,27 +550,27 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         }
         match &app.mode {
             Mode::Dests => {
-                painter.text(pos2(x, y), Align2::LEFT_CENTER, "Son hedefler · en son gidilen klasörler", sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde));
+                painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("Son hedefler · en son gidilen klasörler", "Recent folders · most recently visited"), sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde));
             }
             Mode::Settings => {
-                painter.text(pos2(x, y), Align2::LEFT_CENTER, "Ayarlar", sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde));
+                painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("Ayarlar", "Settings"), sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde));
             }
             Mode::Trash => {
                 paint_trash(&painter, pos2(x + 5.0, y), 5.5, Color32::from_rgb(0xa8, 0xcf, 0xf0));
                 x += 16.0;
-                x += painter.text(pos2(x, y), Align2::LEFT_CENTER, crate::recycle::TITLE, sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde)).width() + 8.0;
+                x += painter.text(pos2(x, y), Align2::LEFT_CENTER, crate::recycle::title(), sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde)).width() + 8.0;
                 x += painter.text(pos2(x, y), Align2::LEFT_CENTER, "·", f.clone(), t::TEXT3).width() + 8.0;
                 let n = app.trash.len();
-                let g = painter.layout_job(job(&format!("{n} öğe · en son silinen üstte · geri yüklemek için Tab ya da sağ tık"), f.clone(), t::TEXT2, (right_limit - x).max(40.0)));
+                let g = painter.layout_job(job(&tf!("{n} öğe · en son silinen üstte · geri yüklemek için Tab ya da sağ tık", "{n} items · most recently deleted first · Tab or right-click to restore"), f.clone(), t::TEXT2, (right_limit - x).max(40.0)));
                 painter.galley(pos2(x, y - g.size().y / 2.0), g, t::TEXT2);
             }
             Mode::ExtInput { .. } => {
-                painter.text(pos2(x, y), Align2::LEFT_CENTER, "Uzantıya göre ara · tüm aramalar bu uzantıyla süzülür", f.clone(), t::TEXT2);
+                painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("Uzantıya göre ara · tüm aramalar bu uzantıyla süzülür", "Search by extension · all searches are filtered by this extension"), f.clone(), t::TEXT2);
             }
             Mode::Note { dir } => {
-                x += painter.text(pos2(x, y), Align2::LEFT_CENTER, "Not al", sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde)).width() + 8.0;
+                x += painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("Not al", "Take a note"), sb(12.0), Color32::from_rgb(0xd5, 0xd8, 0xde)).width() + 8.0;
                 x += painter.text(pos2(x, y), Align2::LEFT_CENTER, "·", f.clone(), t::TEXT3).width() + 8.0;
-                let g = painter.layout_job(job(&format!("{dir} klasörüne kaydedilecek"), f.clone(), t::TEXT2, (right_limit - x).max(40.0)));
+                let g = painter.layout_job(job(&tf!("{dir} klasörüne kaydedilecek", "Will be saved to {dir}"), f.clone(), t::TEXT2, (right_limit - x).max(40.0)));
                 painter.galley(pos2(x, y - g.size().y / 2.0), g, t::TEXT2);
             }
             Mode::Bin => {
@@ -563,14 +579,14 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                 let d = crate::bin::bin_dir().to_string_lossy().to_string();
                 x += painter.text(pos2(x, y), Align2::LEFT_CENTER, &d, f.clone(), t::TEXT2).width() + 12.0;
                 if !crate::bin::on_path() {
-                    let r = painter.text(pos2(x, y), Align2::LEFT_CENTER, "PATH'te değil · eklemek için tıklayın", f.clone(), t::ACCENT);
+                    let r = painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("PATH'te değil · eklemek için tıklayın", "Not on PATH · click to add"), f.clone(), t::ACCENT);
                     strip_click = Some(r.expand(3.0));
                 }
             }
             Mode::Search => {
                 if app.multi {
                     // "Çoklu seçim · 3 seçili" etiketi (sağda)
-                    let lab = format!("Çoklu seçim · {} seçili", app.marked.len());
+                    let lab = tf!("Çoklu seçim · {} seçili", "Multi-select · {} selected", app.marked.len());
                     let tw = text_w(&painter, &lab, sb(11.5));
                     let r = Rect::from_min_max(pos2(right_limit - tw - 34.0, y - 10.0), pos2(right_limit, y + 10.0));
                     painter.rect_filled(r, CornerRadius::same(10), t::accent_dim());
@@ -578,7 +594,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                     painter.text(pos2(r.left() + 26.0, y), Align2::LEFT_CENTER, &lab, sb(11.5), Color32::from_rgb(0xcf, 0xe4, 0xf7));
                     right_limit = r.left() - 12.0;
                     if app.browse.is_none() {
-                        painter.text(pos2(x, y), Align2::LEFT_CENTER, "Boşluk ya da tık ile işaretleyin · Ctrl+A ile hepsini seçin", f.clone(), t::TEXT2);
+                        painter.text(pos2(x, y), Align2::LEFT_CENTER, t!("Boşluk ya da tık ile işaretleyin · Ctrl+A ile hepsini seçin", "Mark with Space or click · Ctrl+A selects all"), f.clone(), t::TEXT2);
                     }
                 }
                 if let Some(b) = &app.browse {
@@ -590,7 +606,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                     let avail = right_limit - x - 40.0;
                     let total = |s: &[(String, Option<String>)]| s.iter().map(|x| text_w(&painter, &x.0, f.clone()) + 18.0).sum::<f32>();
                     let mut skip = 1;
-                    while skip + 1 < n && total(&segs[skip..]) + text_w(&painter, "Tümü", f.clone()) > avail && hl.is_none_or(|h| h > skip) {
+                    while skip + 1 < n && total(&segs[skip..]) + text_w(&painter, t!("Tümü", "All"), f.clone()) > avail && hl.is_none_or(|h| h > skip) {
                         skip += 1;
                     }
                     for (k, (label, path)) in segs.into_iter().enumerate() {
@@ -650,15 +666,15 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     let list_clip = painter.with_clip_rect(l.list_rect);
     if app.items.is_empty() {
         let msg = match (&app.mode, app.browse.is_some(), searching) {
-            (_, _, true) => "Eşleşen öğe yok",
-            (Mode::Dests, _, _) => "Henüz hedef yok",
-            (Mode::Bin, _, _) => "Bin boş · bir öğede Tab, sonra b ile ekleyin",
-            (Mode::Trash, _, _) => "Geri Dönüşüm Kutusu boş",
-            (Mode::Search, _, _) if app.content_query().is_some_and(|q| q.is_empty()) => "İçerikte aranacak metni yazın",
+            (_, _, true) => t!("Eşleşen öğe yok", "No matching items"),
+            (Mode::Dests, _, _) => t!("Henüz hedef yok", "No recent folders yet"),
+            (Mode::Bin, _, _) => t!("Bin boş · bir öğede Tab, sonra b ile ekleyin", "Bin is empty · press Tab on an item, then b to add it"),
+            (Mode::Trash, _, _) => t!("Geri Dönüşüm Kutusu boş", "The Recycle Bin is empty"),
+            (Mode::Search, _, _) if app.content_query().is_some_and(|q| q.is_empty()) => t!("İçerikte aranacak metni yazın", "Type the text to search for inside files"),
             (Mode::Settings | Mode::ExtInput { .. } | Mode::Note { .. }, _, _) => "",
-            (Mode::Search, true, _) if app.ext.is_some() => "Bu klasörde bu uzantıda dosya yok",
-            (Mode::Search, false, _) if app.ext.is_some() => "Bu uzantıda dosya bulunamadı",
-            (_, true, _) => "Bu klasör boş",
+            (Mode::Search, true, _) if app.ext.is_some() => t!("Bu klasörde bu uzantıda dosya yok", "No files with this extension in this folder"),
+            (Mode::Search, false, _) if app.ext.is_some() => t!("Bu uzantıda dosya bulunamadı", "No files with this extension found"),
+            (_, true, _) => t!("Bu klasör boş", "This folder is empty"),
             _ => "",
         };
         if !app.busy_waiting() && app.mode != Mode::Settings && !note_mode {
@@ -674,16 +690,17 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         let editing_term = app.settings_edit.is_some();
         let rows: [(String, String, String); SETTINGS_ROWS] = [
             (
-                "Genel kısayol".into(),
-                if app.recording { "Yeni kombinasyona basın… (Esc iptal)".into() } else { "Pencereyi her yerden aç/kapat · değiştirmek için Enter".into() },
-                if app.recording { "…".into() } else if crate::platform::hotkey_ok() { app.config.hotkey.label() } else { format!("{} (kullanılamıyor)", app.config.hotkey.label()) },
+                t!("Genel kısayol", "Global shortcut").into(),
+                if app.recording { t!("Yeni kombinasyona basın… (Esc iptal)", "Press the new combination… (Esc cancels)").into() } else { t!("Pencereyi her yerden aç/kapat · değiştirmek için Enter", "Show/hide the window from anywhere · Enter to change").into() },
+                if app.recording { "…".into() } else if crate::platform::hotkey_ok() { app.config.hotkey.label() } else { tf!("{} (kullanılamıyor)", "{} (unavailable)", app.config.hotkey.label()) },
             ),
-            ("Windows açılışında başlat".into(), "Bilgisayar açılınca arka planda hazır bekler".into(), if app.config.autostart { "Açık".into() } else { "Kapalı".into() }),
+            (t!("Windows açılışında başlat", "Start with Windows").into(), t!("Bilgisayar açılınca arka planda hazır bekler", "Waits ready in the background after sign-in").into(), if app.config.autostart { t!("Açık", "On").into() } else { t!("Kapalı", "Off").into() }),
             (
                 "Terminal".into(),
-                if editing_term { String::new() } else { "\"Terminal aç\" bununla açılır · Enter ya da Sol/Sağ ile değiştir".into() },
-                if editing_term { "Kaydet".into() } else { app.term_label() },
+                if editing_term { String::new() } else { t!("\"Terminal aç\" bununla açılır · Enter ya da Sol/Sağ ile değiştir", "\"Open terminal\" uses this · change with Enter or Left/Right").into() },
+                if editing_term { t!("Kaydet", "Save").into() } else { app.term_label() },
             ),
+            ("Dil / Language".into(), t!("Arayüz dili · Enter ya da Sol/Sağ ile değiştir", "Interface language · change with Enter or Left/Right").into(), crate::i18n::get().label().into()),
         ];
         for (k, (title, sub, val)) in rows.iter().enumerate() {
             let r = row_rect(&l, k);
@@ -696,6 +713,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
             match k {
                 0 => paint_keycap(&list_clip, ic, Color32::from_rgb(0xa8, 0xcf, 0xf0)),
                 1 => paint_gear(&list_clip, ic, Color32::from_rgb(0xa8, 0xcf, 0xf0)),
+                3 => paint_globe(&list_clip, ic, Color32::from_rgb(0xa8, 0xcf, 0xf0)),
                 _ => paint_terminal(&list_clip, ic, Color32::from_rgb(0xa8, 0xcf, 0xf0)),
             }
             list_clip.text(pos2(r.left() + 54.0, r.top() + 9.0), Align2::LEFT_TOP, title, sb(14.0), t::FG);
@@ -731,7 +749,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                         .margin(egui::Margin::ZERO)
                         .font(reg(12.0))
                         .text_color(t::FG)
-                        .hint_text(RichText::new("Programın tam yolu (ör. C:\\Araçlar\\terminal.exe)").color(t::TEXT3).font(reg(12.0)))
+                        .hint_text(RichText::new(t!("Programın tam yolu (ör. C:\\Araçlar\\terminal.exe)", "Full path of the program (e.g. C:\\Tools\\terminal.exe)")).color(t::TEXT3).font(reg(12.0)))
                         .desired_width(inner.width())
                         .align(Align2::LEFT_CENTER),
                 );
@@ -763,7 +781,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                         .margin(egui::Margin::ZERO)
                         .font(reg(14.0))
                         .text_color(t::FG)
-                        .hint_text(RichText::new("Notunuzu yazın ya da yapıştırın · Enter ile kaydedilir (Shift+Enter yeni satır)").color(t::TEXT3).font(reg(14.0)))
+                        .hint_text(RichText::new(t!("Notunuzu yazın ya da yapıştırın · Enter ile kaydedilir (Shift+Enter yeni satır)", "Type or paste your note · Enter saves (Shift+Enter new line)")).color(t::TEXT3).font(reg(14.0)))
                         .desired_width(inner.width() - 12.0)
                         .lock_focus(true),
                 )
@@ -830,9 +848,9 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         if edit_row == Some(i) {
             paint_row_edit(app, ui, &painter, Rect::from_min_size(pos2(bx - 4.0, r.top() + 5.0), vec2(body_w + 40.0, 24.0)));
             let hint = match app.edit.as_ref().map(|e| &e.kind) {
-                Some(EditKind::BinAlias { .. }) => "Bin takma adı · Enter ekle · Esc iptal",
-                Some(EditKind::New { .. }) => "Yeni · uzantılı ad = dosya, uzantısız = klasör · Enter oluştur · Esc iptal",
-                _ => "Enter uygula · Esc iptal",
+                Some(EditKind::BinAlias { .. }) => t!("Bin takma adı · Enter ekle · Esc iptal", "Bin alias · Enter adds · Esc cancels"),
+                Some(EditKind::New { .. }) => t!("Yeni · uzantılı ad = dosya, uzantısız = klasör · Enter oluştur · Esc iptal", "New · name with extension = file, without = folder · Enter creates · Esc cancels"),
+                _ => t!("Enter uygula · Esc iptal", "Enter applies · Esc cancels"),
             };
             list_clip.text(pos2(bx, r.top() + 35.0), Align2::LEFT_TOP, hint, reg(11.5), t::TEXT3);
         } else {
@@ -880,7 +898,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                 // özgün klasör (kayıt yoksa $R yolu)
                 app.trash.iter().find(|e| e.r_path == it.path).map(|e| e.orig_dir()).unwrap_or_else(|| it.path.clone())
             } else if it.path == crate::recycle::VIRTUAL_PATH {
-                "Silinen öğeler · içine girmek için Enter ya da çift tık".to_string()
+                t!("Silinen öğeler · içine girmek için Enter ya da çift tık", "Deleted items · Enter or double-click to open").to_string()
             } else if app.browse.is_some() && !searching && app.mode == Mode::Search {
                 util::type_label(&it.name, it.is_dir)
             } else if app.mode == Mode::Bin {
@@ -903,7 +921,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         if it.path.is_empty() {
             continue; // yeni öğe yer tutucusu: boyut/tarih yok
         }
-        let (size_s, muted) = if it.is_dir { ("Klasör".to_string(), true) } else { (util::fmt_size(it.size), false) };
+        let (size_s, muted) = if it.is_dir { (t!("Klasör", "Folder").to_string(), true) } else { (util::fmt_size(it.size), false) };
         list_clip.text(pos2(meta_right, r.top() + 10.0), Align2::RIGHT_TOP, size_s, if muted { reg(11.5) } else { FontId::new(11.5, semi()) }, if muted { t::TEXT3 } else { t::META_SIZE });
         list_clip.text(pos2(meta_right, r.top() + 26.0), Align2::RIGHT_TOP, fmt_day(it.mtime), reg(11.5), t::TEXT2);
     }
@@ -942,7 +960,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     let gear_hover = pointer.is_some_and(|p| gear_rect.contains(p));
     paint_gear(&painter, gear_c, if gear_hover { t::FG } else { Color32::from_rgb(0x7a, 0x80, 0x88) });
     let hk_label = app.config.hotkey.label();
-    let hk = if crate::platform::hotkey_ok() { hk_label } else { format!("{hk_label} kullanılamıyor") };
+    let hk = if crate::platform::hotkey_ok() { hk_label } else { tf!("{hk_label} kullanılamıyor", "{hk_label} unavailable") };
     let hcol = if crate::platform::hotkey_ok() { Color32::from_rgb(0x7a, 0x80, 0x88) } else { t::ERR };
     let rs = painter.text(pos2(gear_rect.left() - 4.0, fy), Align2::RIGHT_CENTER, "Ctrl+S", sb(10.5), t::KEY.gamma_multiply(0.8));
     painter.line_segment([pos2(rs.left() - 9.0, fy - 6.0), pos2(rs.left() - 9.0, fy + 6.0)], Stroke::new(1.0, t::line()));
@@ -1299,39 +1317,39 @@ fn paint_row_edit(app: &mut App, ui: &mut Ui, painter: &Painter, r: Rect) {
 
 fn footer_hints(app: &App) -> Vec<(&'static str, &'static str)> {
     if app.confirm.is_some() {
-        return vec![("Sol/Sağ", "Seç"), ("Enter", "Onayla"), ("Esc", "Vazgeç")];
+        return vec![(t!("Sol/Sağ", "Left/Right"), t!("Seç", "Select")), ("Enter", t!("Onayla", "Confirm")), ("Esc", t!("Vazgeç", "Cancel"))];
     }
     if app.menu.as_ref().is_some_and(|m| !m.context) {
-        return vec![("Enter", "Seç"), ("Shift", "Yol"), ("Esc", "Kapat")];
+        return vec![("Enter", t!("Seç", "Select")), ("Shift", t!("Yol", "Path")), ("Esc", t!("Kapat", "Close"))];
     }
     if app.menu.is_some() {
-        return vec![("Enter", "Seç"), ("Esc", "Kapat")];
+        return vec![("Enter", t!("Seç", "Select")), ("Esc", t!("Kapat", "Close"))];
     }
     if app.edit.is_some() {
-        return vec![("Enter", "Uygula"), ("Esc", "İptal")];
+        return vec![("Enter", t!("Uygula", "Apply")), ("Esc", t!("İptal", "Cancel"))];
     }
     if app.crumb_sel.is_some() {
-        return vec![("Sol/Sağ", "Bölüm"), ("Enter", "Git"), ("Esc", "Çık")];
+        return vec![(t!("Sol/Sağ", "Left/Right"), t!("Bölüm", "Part")), ("Enter", t!("Git", "Go")), ("Esc", t!("Çık", "Exit"))];
     }
     match app.mode {
-        Mode::Note { .. } => vec![("Enter", "Kaydet"), ("Shift+Enter", "Yeni satır"), ("Esc", "Vazgeç")],
-        Mode::Settings if app.settings_edit.is_some() => vec![("Enter", "Kaydet"), ("Esc", "Vazgeç")],
-        Mode::Dests => vec![("Enter", "Gir"), ("Esc", "Geri")],
-        Mode::Bin => vec![("Enter", "Aç"), ("F2", "Ad değiştir"), ("Del", "Kaldır"), ("Esc", "Geri")],
-        Mode::Settings if app.recording => vec![("Kombinasyon", "Bas"), ("Esc", "İptal")],
-        Mode::Settings => vec![("Enter", "Değiştir"), ("Ctrl+S", "Kapat"), ("Esc", "Geri")],
-        Mode::Trash if app.items.is_empty() => vec![("Tab", "İşlem"), ("Esc", "Geri")],
-        Mode::Trash => vec![("Enter", "Aç"), ("Shift+Space", "Önizle"), ("Tab", "İşlem"), ("Alt+Enter", "Özgün klasör"), ("Esc", "Geri")],
-        Mode::ExtInput { .. } => vec![("Enter", "Süz"), ("Esc", "İptal")],
+        Mode::Note { .. } => vec![("Enter", t!("Kaydet", "Save")), ("Shift+Enter", t!("Yeni satır", "New line")), ("Esc", t!("Vazgeç", "Cancel"))],
+        Mode::Settings if app.settings_edit.is_some() => vec![("Enter", t!("Kaydet", "Save")), ("Esc", t!("Vazgeç", "Cancel"))],
+        Mode::Dests => vec![("Enter", t!("Gir", "Open")), ("Esc", t!("Geri", "Back"))],
+        Mode::Bin => vec![("Enter", t!("Aç", "Open")), ("F2", t!("Ad değiştir", "Rename")), ("Del", t!("Kaldır", "Remove")), ("Esc", t!("Geri", "Back"))],
+        Mode::Settings if app.recording => vec![(t!("Kombinasyon", "Combination"), t!("Bas", "Press")), ("Esc", t!("İptal", "Cancel"))],
+        Mode::Settings => vec![("Enter", t!("Değiştir", "Change")), ("Ctrl+S", t!("Kapat", "Close")), ("Esc", t!("Geri", "Back"))],
+        Mode::Trash if app.items.is_empty() => vec![("Tab", t!("İşlem", "Actions")), ("Esc", t!("Geri", "Back"))],
+        Mode::Trash => vec![("Enter", t!("Aç", "Open")), ("Shift+Space", t!("Önizle", "Preview")), ("Tab", t!("İşlem", "Actions")), ("Alt+Enter", t!("Özgün klasör", "Original folder")), ("Esc", t!("Geri", "Back"))],
+        Mode::ExtInput { .. } => vec![("Enter", t!("Süz", "Filter")), ("Esc", t!("İptal", "Cancel"))],
         Mode::Search => {
             if app.multi {
-                return vec![("Boşluk", "İşaretle"), ("Ctrl+A", "Tümü"), ("Enter", "Aç"), ("Tab", "İşlem"), ("Esc", "Çık")];
+                return vec![(t!("Boşluk", "Space"), t!("İşaretle", "Mark")), ("Ctrl+A", t!("Tümü", "All")), ("Enter", t!("Aç", "Open")), ("Tab", t!("İşlem", "Actions")), ("Esc", t!("Çık", "Exit"))];
             }
             if !app.marked.is_empty() {
-                return vec![("Ctrl+C", "Kopyala"), ("Ctrl+X", "Kes"), ("Del", "Sil"), ("Tab", "İşlem"), ("Esc", "Seçimi bırak")];
+                return vec![("Ctrl+C", t!("Kopyala", "Copy")), ("Ctrl+X", t!("Kes", "Cut")), ("Del", t!("Sil", "Delete")), ("Tab", t!("İşlem", "Actions")), ("Esc", t!("Seçimi bırak", "Clear selection"))];
             }
             // sığmayan sondan düşer (Gezgin en sonda: sağ tık menüsünde de var)
-            vec![("Enter", "Aç"), ("Shift+Space", "Önizle"), ("Tab", "İşlem"), ("Ctrl+N", "Not"), ("Ctrl+T", "Terminal"), ("Alt+Enter", "Gezgin")]
+            vec![("Enter", t!("Aç", "Open")), ("Shift+Space", t!("Önizle", "Preview")), ("Tab", t!("İşlem", "Actions")), ("Ctrl+N", t!("Not", "Note")), ("Ctrl+T", "Terminal"), ("Alt+Enter", t!("Gezgin", "Explorer"))]
         }
     }
 }
@@ -1359,7 +1377,7 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
             _ if app.multi && app.marked.len() > 1 => app.run(Act::OpenAll, ctx),
             _ => app.run(Act::Open, ctx),
         },
-        "Boşluk" => {
+        "Boşluk" | "Space" => {
             let i = app.sel;
             app.toggle_mark(i);
         }
@@ -1370,7 +1388,7 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
             app.open_menu(false, p);
         }
         "Alt+Enter" => app.run(Act::Reveal, ctx),
-        "Ctrl+Sol" => app.browse_up_pub(),
+        "Ctrl+Sol" | "Ctrl+Left" => app.browse_up_pub(),
         "Ctrl+N" => app.run(Act::Note, ctx),
         "Ctrl+T" => app.run(Act::Terminal, ctx),
         "Ctrl+A" if app.mode == Mode::Search => app.run(Act::SelectAll, ctx),
@@ -1389,7 +1407,7 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
             }
         }
         "Shift+Enter" => app.note_text.push('\n'),
-        "Sol/Sağ" => {
+        "Sol/Sağ" | "Left/Right" => {
             if let Some(c) = &mut app.confirm {
                 c.sel = (c.sel + 1) % c.buttons.len().max(1);
             }
@@ -1399,7 +1417,7 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
         "Del" => app.run(Act::Delete, ctx),
         "Ctrl+C" => app.run(Act::Copy, ctx),
         "Ctrl+X" => app.run(Act::Cut, ctx),
-        "Esc" | "Seçimi bırak" => app.escape(ctx),
+        "Esc" => app.escape(ctx),
         _ => {}
     }
 }
@@ -1496,7 +1514,7 @@ fn paint_preview(app: &mut App, ui: &Ui, painter: &Painter, pr: Rect) -> Option<
         painter.galley(pos2(inner.left(), y), g, t::TEXT2);
         y += 21.0;
         let mut x = inner.left();
-        for (k, lab) in [("Shift+Space", "kapat ·"), ("Enter", if it.is_dir { "gir" } else { "aç" })] {
+        for (k, lab) in [("Shift+Space", t!("kapat ·", "close ·")), ("Enter", if it.is_dir { t!("gir", "open") } else { t!("aç", "open") })] {
             let r = painter.text(pos2(x, y), Align2::LEFT_TOP, k, sb(11.0), t::KEY);
             let r2 = painter.text(pos2(r.right() + 4.0, y), Align2::LEFT_TOP, lab, reg(11.0), t::TEXT3);
             x = r2.right() + 5.0;

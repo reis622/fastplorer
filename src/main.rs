@@ -1,6 +1,8 @@
 //! Fastplorer — PowerToys Run benzeri dosya başlatıcı (Windows GUI, v0.2).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod app;
 mod bin;
 mod config;
@@ -131,6 +133,7 @@ fn main() -> eframe::Result<()> {
     // eski "bul" verilerini (ilk açılışta bir kez) Fastplorer klasörüne taşı
     bin::migrate_legacy();
     let (config, first_run) = config::Config::load();
+    i18n::set(config.ui_lang());
     if first_run {
         config.save();
     }

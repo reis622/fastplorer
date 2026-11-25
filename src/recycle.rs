@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 
 /// Listede Geri Dönüşüm Kutusu'nu temsil eden sanal öğenin yolu (gerçek bir yol değildir).
 pub const VIRTUAL_PATH: &str = "::geri-donusum-kutusu";
-pub const TITLE: &str = "Geri Dönüşüm Kutusu";
+/// Görünen ad (geçerli dilde).
+pub fn title() -> &'static str {
+    t!("Geri Dönüşüm Kutusu", "Recycle Bin")
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -157,12 +160,12 @@ pub fn free_target(orig: &Path, is_dir: bool) -> Option<PathBuf> {
 pub fn restore(e: &Entry) -> Result<String, String> {
     let r = Path::new(&e.r_path);
     if std::fs::symlink_metadata(r).is_err() {
-        return Err("öğe artık Geri Dönüşüm Kutusu'nda değil".into());
+        return Err(t!("öğe artık Geri Dönüşüm Kutusu'nda değil", "the item is no longer in the Recycle Bin").into());
     }
     let orig = PathBuf::from(&e.orig);
-    let parent = orig.parent().filter(|p| !p.as_os_str().is_empty()).ok_or("özgün klasör bilinmiyor")?;
-    std::fs::create_dir_all(parent).map_err(|x| format!("özgün klasör oluşturulamadı: {x}"))?;
-    let target = free_target(&orig, e.is_dir).ok_or("uygun bir ad bulunamadı")?;
+    let parent = orig.parent().filter(|p| !p.as_os_str().is_empty()).ok_or(t!("özgün klasör bilinmiyor", "original folder unknown"))?;
+    std::fs::create_dir_all(parent).map_err(|x| tf!("özgün klasör oluşturulamadı: {x}", "could not create the original folder: {x}"))?;
+    let target = free_target(&orig, e.is_dir).ok_or(t!("uygun bir ad bulunamadı", "no free name found"))?;
     crate::platform::move_no_replace(r, &target)?;
     let _ = std::fs::remove_file(&e.i_path);
     Ok(target.to_string_lossy().into())

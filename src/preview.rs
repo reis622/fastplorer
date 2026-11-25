@@ -50,21 +50,21 @@ fn meta_lines(path: &str, md: Option<&std::fs::Metadata>) -> Vec<Line> {
     let mut v = Vec::new();
     let kv = |k: &str, val: String| Line::from(vec![Span::styled(format!("{k}\t"), Style::new().fg(t::DIM)), Span::styled(val, Style::new().fg(t::FG))]);
     let name = std::path::Path::new(path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    v.push(kv("Tür", util::type_label(&name, md.is_some_and(|m| m.is_dir()))));
+    v.push(kv(t!("Tür", "Type"), util::type_label(&name, md.is_some_and(|m| m.is_dir()))));
     if let Some(m) = md {
         if !m.is_dir() {
-            v.push(kv("Boyut", format!("{} ({} bayt)", util::fmt_size(m.len()), util::fmt_count(m.len() as usize))));
+            v.push(kv(t!("Boyut", "Size"), tf!("{} ({} bayt)", "{} ({} bytes)", util::fmt_size(m.len()), util::fmt_count(m.len() as usize))));
         }
-        v.push(kv("Değiştirilme", util::fmt_date(crate::index::mtime_of(m))));
+        v.push(kv(t!("Değiştirilme", "Modified"), util::fmt_date(crate::index::mtime_of(m))));
         if let Some(c) = m.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
-            v.push(kv("Oluşturulma", util::fmt_date(c.as_secs() as i64)));
+            v.push(kv(t!("Oluşturulma", "Created"), util::fmt_date(c.as_secs() as i64)));
         }
         if m.permissions().readonly() {
-            v.push(kv("Öznitelik", "Salt okunur".into()));
+            v.push(kv(t!("Öznitelik", "Attributes"), t!("Salt okunur", "Read-only").into()));
         }
     }
     if let Some(p) = std::path::Path::new(path).parent() {
-        v.push(kv("Konum", p.to_string_lossy().to_string()));
+        v.push(kv(t!("Konum", "Location"), p.to_string_lossy().to_string()));
     }
     v
 }
@@ -72,60 +72,60 @@ fn meta_lines(path: &str, md: Option<&std::fs::Metadata>) -> Vec<Line> {
 pub fn build(r: &PreviewReq) -> Preview {
     let mut p = Preview { key: r.key, ..Default::default() };
     if r.path == crate::recycle::VIRTUAL_PATH {
-        p.info = crate::recycle::TITLE.into();
-        p.lines.push(Line::raw("Silinen dosyalarınız burada."));
-        p.lines.push(Line::raw("İçine girince gerçek adları, özgün klasörleri ve silinme tarihleriyle görünür."));
-        p.footer = "Enter ya da çift tık ile içine gir".into();
+        p.info = crate::recycle::title().into();
+        p.lines.push(Line::raw(t!("Silinen dosyalarınız burada.", "Your deleted files are here.")));
+        p.lines.push(Line::raw(t!("İçine girince gerçek adları, özgün klasörleri ve silinme tarihleriyle görünür.", "Open it to see their real names, original folders and deletion dates.")));
+        p.footer = t!("Enter ya da çift tık ile içine gir", "Enter or double-click to open").into();
         return p;
     }
     let md = std::fs::metadata(&r.path).ok();
     let Some(md) = md else {
-        p.info = "Bulunamadı".into();
-        p.lines.push(Line::styled("Öğe artık mevcut değil.", Style::new().fg(t::ERR)));
+        p.info = t!("Bulunamadı", "Not found").into();
+        p.lines.push(Line::styled(t!("Öğe artık mevcut değil.", "The item no longer exists."), Style::new().fg(t::ERR)));
         return p;
     };
     let name = std::path::Path::new(&r.path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| r.path.clone());
     if md.is_dir() || r.is_dir {
         folder(&r.path, &mut p);
-        p.footer = "Enter ile Gezgin'de aç  ·  Alt+Enter üst klasörde göster".into();
+        p.footer = t!("Enter ile Gezgin'de aç  ·  Alt+Enter üst klasörde göster", "Enter opens in Explorer  ·  Alt+Enter shows in parent folder").into();
         return p;
     }
     let cat = util::category(&name, false);
     let size = util::fmt_size(md.len());
     if util::is_textual(&name) {
         text(&r.path, &name, r, &mut p);
-        p.footer = "Enter ile varsayılan uygulamada aç".into();
+        p.footer = t!("Enter ile varsayılan uygulamada aç", "Enter opens in the default app").into();
         return p;
     }
     match cat {
         CAT_IMAGE => {
             image_preview(&r.path, r.w, r.h, &mut p);
             p.info = format!("{}  ·  {}", util::ext_of(&name).to_uppercase(), size) + &p.info;
-            p.footer = "Enter ile görüntüleyicide aç".into();
+            p.footer = t!("Enter ile görüntüleyicide aç", "Enter opens in the viewer").into();
         }
         CAT_ARCHIVE if util::ext_of(&name) == "zip" || util::ext_of(&name) == "jar" => {
             zip_tree(&r.path, &mut p);
             p.info = format!("{}  ·  {}", p.info, size);
-            p.footer = "Enter ile arşivi aç  ·  Alt+Enter klasörü aç".into();
+            p.footer = t!("Enter ile arşivi aç  ·  Alt+Enter klasörü aç", "Enter opens the archive  ·  Alt+Enter opens the folder").into();
         }
         _ => {
             let ext = util::ext_of(&name);
             if ext == "docx" && docx_text(&r.path, &mut p) {
-                p.info = format!("Word belgesi  ·  {size}");
+                p.info = tf!("Word belgesi  ·  {size}", "Word document  ·  {size}");
             } else {
                 p.info = format!("{}  ·  {}", util::type_label(&name, false), size);
                 p.lines = meta_lines(&r.path, Some(&md));
             }
             p.footer = match cat {
-                CAT_VIDEO => "Enter ile oynat (varsayılan oynatıcı)  ·  Alt+Enter klasörü aç".into(),
-                CAT_AUDIO => "Enter ile çal (varsayılan oynatıcı)  ·  Alt+Enter klasörü aç".into(),
-                _ => "Enter ile varsayılan uygulamada aç".into(),
+                CAT_VIDEO => t!("Enter ile oynat (varsayılan oynatıcı)  ·  Alt+Enter klasörü aç", "Enter plays it (default player)  ·  Alt+Enter opens the folder").into(),
+                CAT_AUDIO => t!("Enter ile çal (varsayılan oynatıcı)  ·  Alt+Enter klasörü aç", "Enter plays it (default player)  ·  Alt+Enter opens the folder").into(),
+                _ => t!("Enter ile varsayılan uygulamada aç", "Enter opens in the default app").into(),
             };
             if matches!(cat, CAT_VIDEO | CAT_AUDIO) {
                 p.lines.push(Line::raw(""));
                 p.lines.push(Line::from(vec![
-                    Span::styled(" ▶ Oynat ", Style::new().fg(t::BG).bg(t::ACCENT).add_modifier(Modifier::BOLD)),
-                    Span::styled("  Enter / çift tık", Style::new().fg(t::DIM)),
+                    Span::styled(t!(" ▶ Oynat ", " ▶ Play "), Style::new().fg(t::BG).bg(t::ACCENT).add_modifier(Modifier::BOLD)),
+                    Span::styled(t!("  Enter / çift tık", "  Enter / double-click"), Style::new().fg(t::DIM)),
                 ]));
             }
         }
@@ -150,7 +150,7 @@ fn folder(path: &str, p: &mut Preview) {
     }
     dirs.sort_by_key(|a| util::fold(a));
     files.sort_by_key(|a| util::fold(&a.0));
-    p.info = format!("Klasör  ·  {} klasör  ·  {} dosya", dirs.len(), files.len());
+    p.info = tf!("Klasör  ·  {} klasör  ·  {} dosya", "Folder  ·  {} folders  ·  {} files", dirs.len(), files.len());
     for d in dirs.iter().take(400) {
         p.lines.push(Line::entry(LineIcon::Folder, d.clone(), Style::new().fg(t::FG).add_modifier(Modifier::BOLD), None, 0));
     }
@@ -159,17 +159,17 @@ fn folder(path: &str, p: &mut Preview) {
     }
     let more = dirs.len().saturating_sub(400) + files.len().saturating_sub(400);
     if more > 0 {
-        p.lines.push(Line::styled(format!("… ve {} öğe daha", util::fmt_count(more)), Style::new().fg(t::DIM)));
+        p.lines.push(Line::styled(tf!("… ve {} öğe daha", "… and {} more", util::fmt_count(more)), Style::new().fg(t::DIM)));
     }
     if dirs.is_empty() && files.is_empty() {
-        p.lines.push(Line::styled("(boş klasör)", Style::new().fg(t::DIM)));
+        p.lines.push(Line::styled(t!("(boş klasör)", "(empty folder)"), Style::new().fg(t::DIM)));
     }
 }
 
 fn zip_tree(path: &str, p: &mut Preview) {
     let Ok(f) = std::fs::File::open(path) else { return };
     let Ok(mut z) = zip::ZipArchive::new(f) else {
-        p.info = "ZIP (okunamadı)".into();
+        p.info = t!("ZIP (okunamadı)", "ZIP (unreadable)").into();
         return;
     };
     let mut names: Vec<String> = (0..z.len()).filter_map(|i| z.by_index_raw(i).ok().and_then(|f| f.name().ok().map(|n| n.replace('\\', "/")))).collect();
@@ -196,7 +196,7 @@ fn zip_tree(path: &str, p: &mut Preview) {
             }
         }
     }
-    p.info = format!("ZIP  ·  {nf} dosya  ·  {nd} klasör");
+    p.info = tf!("ZIP  ·  {nf} dosya  ·  {nd} klasör", "ZIP  ·  {nf} files  ·  {nd} folders");
 }
 
 fn docx_text(path: &str, p: &mut Preview) -> bool {
@@ -229,7 +229,7 @@ fn image_preview(path: &str, w: u16, h: u16, p: &mut Preview) {
     let img = match image::ImageReader::open(path).and_then(|r| r.with_guessed_format()).map_err(|e| e.to_string()).and_then(|r| r.decode().map_err(|e| e.to_string())) {
         Ok(i) => i,
         Err(_) => {
-            p.lines.push(Line::styled("Bu görüntü biçimi önizlenemiyor.", Style::new().fg(t::DIM)));
+            p.lines.push(Line::styled(t!("Bu görüntü biçimi önizlenemiyor.", "This image format cannot be previewed."), Style::new().fg(t::DIM)));
             return;
         }
     };
@@ -385,16 +385,16 @@ fn text(path: &str, name: &str, r: &PreviewReq, p: &mut Preview) {
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {
-            p.lines.push(Line::styled(format!("Okunamadı: {e}"), Style::new().fg(t::ERR)));
+            p.lines.push(Line::styled(tf!("Okunamadı: {e}", "Could not read: {e}"), Style::new().fg(t::ERR)));
             return;
         }
     };
     let ext = util::ext_of(name);
     let text = String::from_utf8_lossy(&data[..data.len().min(4 << 20)]).replace('\t', "    ");
     let total = text.lines().count();
-    p.info = format!("{}  ·  {} satır  ·  {}", util::type_label(name, false), util::fmt_count(total), util::fmt_size(data.len() as u64));
+    p.info = tf!("{}  ·  {} satır  ·  {}", "{}  ·  {} lines  ·  {}", util::type_label(name, false), util::fmt_count(total), util::fmt_size(data.len() as u64));
     if data[..data.len().min(8192)].contains(&0) {
-        p.lines.push(Line::styled("İkili dosya, metin önizlemesi yok.", Style::new().fg(t::DIM)));
+        p.lines.push(Line::styled(t!("İkili dosya, metin önizlemesi yok.", "Binary file, no text preview."), Style::new().fg(t::DIM)));
         return;
     }
     let focus = r.line.unwrap_or(0);

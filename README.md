@@ -2,7 +2,7 @@
 
 **Fastplorer, Windows için hızlı bir dosya gezgini ve dosya arama aracıdır.** Bir kısayola (varsayılan **F9**) basarsınız, ortada küçük bir pencere açılır. Yazmaya başladığınız anda sonuçlar gelir. Dosyayı açar, klasörün içine girer, kopyalar, taşır, adını değiştirir ya da Geri Dönüşüm Kutusu'ndan geri yüklersiniz. Bunların hepsi klavyeyle yapılabilir; isterseniz yalnız fareyle de kullanılabilir.
 
-*English summary below.*
+*English summary below.* · Arayüz **Türkçe ve İngilizce** kullanılabilir.
 
 ## Neden hızlı?
 
@@ -66,6 +66,10 @@ Seçili öğenin önizlemesini açar: metin ve kod dosyaları (içerik aramasın
 - **Genel kısayol:** Varsayılan F9; başka bir tuş kombinasyonuyla değiştirilebilir.
 - **Windows açılışında başlat:** Bilgisayar açılınca arka planda hazır bekler.
 - **Terminal seçimi.**
+- **Dil / Language:** Türkçe ya da English. Değişiklik yeniden başlatmadan hemen uygulanır ve kaydedilir. İlk açılışta Windows arayüz dili Türkçe ise Türkçe, değilse İngilizce gelir.
+
+### Dil desteği
+Menüler, ipuçları, bildirimler, onay pencereleri, ayarlar, önizleme ve tepsi menüsü dahil bütün arayüz iki dildedir. Türkçe menü harfleri değişmedi. İngilizcede harfler İngilizce adlara göre seçilmiştir (ör. Copy **c**, Recent folders **f**, Clear clipboard **l**, Restore **r**).
 
 Tepsi simgesinin menüsünde Göster ve Çıkış seçenekleri bulunur.
 
@@ -140,7 +144,8 @@ cargo test
 - **Open a terminal here** (Ctrl+T): Windows Terminal, PowerShell, CMD, Hyper, or a custom program.
 - **Preview** (Shift+Space): text/code, images, zip contents, folders.
 - **Recycle Bin view:** search "recycle"/"bin" or browse the Desktop. It lists your deleted items with original folder and deletion date, newest first. **Restore** never overwrites (`name (2).ext`) and recreates missing folders. There is no permanent delete.
-- **Settings** (Ctrl+S or the gear): global hotkey, start with Windows, terminal choice.
+- **Settings** (Ctrl+S or the gear): global hotkey, start with Windows, terminal choice, and **language**.
+- **Languages:** the whole UI is available in English and Turkish. You can switch in Settings → "Dil / Language", and the change applies immediately without a restart. On first run the app uses Turkish if the Windows display language is Turkish, otherwise English. English menus use English letter keys (e.g. Copy **c**, Recent folders **f**, Clear clipboard **l**, Restore **r**).
 - **Mouse-only use:** every hint in the bottom bar is clickable, and lists and menus scroll with the mouse wheel.
 
 **Install:** download `Fastplorer.exe` from Releases and run it. No installer is needed; it targets Windows 10/11.

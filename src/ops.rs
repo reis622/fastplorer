@@ -17,7 +17,7 @@ pub fn open(path: &str) -> Result<(), String> {
         let (verb, file) = (wide("open"), wide(path));
         let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
         if (r as isize) <= 32 {
-            return Err(format!("Açılamadı (kod {})", r as isize));
+            return Err(tf!("Açılamadı (kod {})", "Could not open (code {})", r as isize));
         }
         Ok(())
     }
@@ -319,7 +319,7 @@ fn copy_rec(src: &Path, dst: &Path) -> io::Result<()> {
     let md = std::fs::symlink_metadata(src)?;
     if md.is_dir() {
         if dst.starts_with(src) {
-            return Err(io::Error::other("Klasör kendi içine kopyalanamaz"));
+            return Err(io::Error::other(t!("Klasör kendi içine kopyalanamaz", "A folder cannot be copied into itself")));
         }
         std::fs::create_dir_all(dst)?;
         for e in std::fs::read_dir(src)? {
@@ -339,11 +339,11 @@ pub fn remove_any(p: &Path) -> io::Result<()> {
 /// `src`'yi `dst` yoluna kopyala ya da taşı. `overwrite` ise var olan hedef önce kaldırılır.
 pub fn transfer(src: &Path, dst: &Path, cut: bool, overwrite: bool) -> io::Result<()> {
     if src == dst {
-        return Err(io::Error::other("Kaynak ve hedef aynı"));
+        return Err(io::Error::other(t!("Kaynak ve hedef aynı", "Source and destination are the same")));
     }
     if dst.exists() {
         if !overwrite {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "Hedefte aynı adda öğe var"));
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, t!("Hedefte aynı adda öğe var", "An item with the same name exists at the destination")));
         }
         remove_any(dst)?;
     }

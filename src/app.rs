@@ -1,5 +1,6 @@
 //! Başlatıcı penceresi: durum, klavye/fare, işlemler.
 
+use crate::i18n::k;
 use crate::index::Indexer;
 use crate::preview::{self, Preview, PreviewReq};
 use crate::recent::{self, State};
@@ -30,7 +31,7 @@ pub const LIST_PAD_B: f32 = 2.0;
 pub const FOOTER_H: f32 = 34.0;
 pub const MAX_ROWS: usize = 8;
 /// Ayarlar satırları: kısayol, Windows açılışında başlat, terminal.
-pub const SETTINGS_ROWS: usize = 3;
+pub const SETTINGS_ROWS: usize = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
@@ -370,9 +371,9 @@ pub struct App {
 /// "Bin'den kaldırılsın mı?" penceresi: Kaldır seçili gelir (Enter onaylar, ←/→ değiştirir, Esc vazgeçer).
 pub fn bin_remove_confirm(alias: String) -> Confirm {
     Confirm {
-        title: "Bin'den kaldırılsın mı?".into(),
-        lines: vec![format!("\"{alias}\" kısayolu kaldırılacak."), "Hedef dosyanın kendisi silinmez.".into()],
-        buttons: vec!["Kaldır", "Vazgeç"],
+        title: t!("Bin'den kaldırılsın mı?", "Remove from Bin?").into(),
+        lines: vec![tf!("\"{alias}\" kısayolu kaldırılacak.", "The shortcut \"{alias}\" will be removed."), t!("Hedef dosyanın kendisi silinmez.", "The target file itself is not deleted.").into()],
+        buttons: vec![t!("Kaldır", "Remove"), t!("Vazgeç", "Cancel")],
         sel: 0,
         kind: CKind::BinRemove { alias },
     }
@@ -395,7 +396,7 @@ pub fn crumb_segments(browse: &str) -> Vec<(String, Option<String>)> {
         let label = if label.is_empty() { a.to_string_lossy().to_string() } else { label };
         segs.push((label, Some(a.to_string_lossy().to_string())));
     }
-    segs.push(("Tümü".into(), None));
+    segs.push((t!("Tümü", "All").into(), None));
     segs.reverse();
     segs
 }
@@ -433,6 +434,7 @@ fn spawn_thumbs(rx: Receiver<String>, tx: Sender<ThumbMsg>) {
 
 impl App {
     pub fn new(start_hidden: bool, config: Config) -> App {
+        crate::i18n::set(config.ui_lang());
         let idx = Arc::new(Indexer::new());
         idx.start(true);
         {
@@ -551,12 +553,12 @@ impl App {
             ClipStrip::Hidden => return None,
             ClipStrip::Shown => {
                 if *cut {
-                    "Kesildi"
+                    t!("Kesildi", "Cut")
                 } else {
-                    "Kopyalandı"
+                    t!("Kopyalandı", "Copied")
                 }
             }
-            ClipStrip::Pasted(_) => "Yapıştırıldı",
+            ClipStrip::Pasted(_) => t!("Yapıştırıldı", "Pasted"),
         };
         Some((v.first().map(|p| file_name(p)).unwrap_or_default(), v.len(), verb))
     }
@@ -578,7 +580,7 @@ impl App {
     pub fn clear_clip(&mut self) {
         let Some((ours, _)) = self.clip.take() else {
             self.clip_strip = ClipStrip::Hidden;
-            self.toast("Pano zaten boş", true);
+            self.toast(t!("Pano zaten boş", "Clipboard is already empty"), true);
             return;
         };
         self.clip_strip = ClipStrip::Hidden;
@@ -586,7 +588,7 @@ impl App {
         if ops::get_clipboard_files().is_some_and(|(v, _)| v == ours) {
             ops::clear_clipboard();
         }
-        self.toast("Pano temizlendi", true);
+        self.toast(t!("Pano temizlendi", "Clipboard cleared"), true);
     }
 
     /// İçerik araması etkin mi ve aranan metin.
@@ -843,7 +845,7 @@ impl App {
         self.clear_marks();
         self.anchor_path = self.selected().map(|i| i.path.clone());
         if on {
-            self.toast("Çoklu seçim: Boşluk ya da tık ile işaretleyin, Ctrl+A ile hepsini seçin", true);
+            self.toast(t!("Çoklu seçim: Boşluk ya da tık ile işaretleyin, Ctrl+A ile hepsini seçin", "Multi-select: mark with Space or click, Ctrl+A selects all"), true);
         }
     }
 
@@ -978,6 +980,8 @@ impl App {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             it.path.hash(&mut h);
             it.mtime.hash(&mut h);
+            // dil değişince önizleme yeni dilde yeniden üretilir
+            crate::i18n::en().hash(&mut h);
             h.finish() | 1
         };
         if key == self.pkey {
@@ -1076,10 +1080,10 @@ impl App {
                 if let Some(d) = self.trash_sel().map(|e| e.orig_dir()) {
                     if std::path::Path::new(&d).is_dir() {
                         if let Err(e) = ops::open(&d) {
-                            self.toast(format!("Klasör açılamadı: {e}"), false);
+                            self.toast(tf!("Klasör açılamadı: {e}", "Could not open the folder: {e}"), false);
                         }
                     } else {
-                        self.toast(format!("Özgün klasör artık yok: {d}"), false);
+                        self.toast(tf!("Özgün klasör artık yok: {d}", "The original folder no longer exists: {d}"), false);
                     }
                 }
             }
@@ -1089,12 +1093,12 @@ impl App {
                     if !cfg!(windows) {
                         ctx.copy_text(o.clone());
                     }
-                    self.toast(if ok || !cfg!(windows) { format!("Özgün yol kopyalandı: {o}") } else { "Pano kullanılamadı".into() }, ok || !cfg!(windows));
+                    self.toast(if ok || !cfg!(windows) { tf!("Özgün yol kopyalandı: {o}", "Original path copied: {o}") } else { t!("Pano kullanılamadı", "Clipboard unavailable").into() }, ok || !cfg!(windows));
                 }
             }
             Act::TrashExplorer => {
                 if let Err(e) = platform::open_recycle_bin_in_explorer() {
-                    self.toast(format!("Gezgin açılamadı: {e}"), false);
+                    self.toast(tf!("Gezgin açılamadı: {e}", "Could not open Explorer: {e}"), false);
                 } else {
                     platform::hide(ctx);
                 }
@@ -1102,7 +1106,7 @@ impl App {
             Act::Refresh => {
                 self.idx.start(true);
                 self.research_keep();
-                self.toast("Dizin yenileniyor", true);
+                self.toast(t!("Dizin yenileniyor", "Refreshing the index"), true);
             }
             Act::SelectAll => {
                 if self.mode == Mode::Search {
@@ -1130,7 +1134,7 @@ impl App {
     fn open_all(&mut self, ctx: &Context) {
         let ts = self.targets();
         if ts.is_empty() {
-            self.toast("Önce bir öğe seçin", false);
+            self.toast(t!("Önce bir öğe seçin", "Select an item first"), false);
             return;
         }
         if ts.len() == 1 {
@@ -1140,7 +1144,7 @@ impl App {
         }
         const MAX_OPEN: usize = 20;
         if ts.len() > MAX_OPEN {
-            self.toast(format!("Aynı anda en fazla {MAX_OPEN} öğe açılabilir ({} seçili)", ts.len()), false);
+            self.toast(tf!("Aynı anda en fazla {MAX_OPEN} öğe açılabilir ({} seçili)", "At most {MAX_OPEN} items can be opened at once ({} selected)", ts.len()), false);
             return;
         }
         let mut err = None;
@@ -1158,10 +1162,10 @@ impl App {
         self.state.save();
         match err {
             None => {
-                self.toast(format!("{} öğe açıldı", ts.len()), true);
+                self.toast(tf!("{} öğe açıldı", "{} items opened", ts.len()), true);
                 platform::hide(ctx);
             }
-            Some(e) => self.toast(format!("Bazı öğeler açılamadı: {e}"), false),
+            Some(e) => self.toast(tf!("Bazı öğeler açılamadı: {e}", "Some items could not be opened: {e}"), false),
         }
     }
 
@@ -1169,7 +1173,7 @@ impl App {
 
     pub fn start_note(&mut self) {
         let Some(dir) = self.current_dir() else {
-            self.toast("Önce bir klasöre girin", false);
+            self.toast(t!("Önce bir klasöre girin", "Open a folder first"), false);
             return;
         };
         self.menu = None;
@@ -1197,7 +1201,7 @@ impl App {
     pub fn save_note(&mut self) {
         let Mode::Note { dir } = self.mode.clone() else { return };
         if self.note_text.trim().is_empty() {
-            self.toast("Not boş · bir şey yazın ya da yapıştırın", false);
+            self.toast(t!("Not boş · bir şey yazın ya da yapıştırın", "The note is empty · type or paste something"), false);
             return;
         }
         let now = chrono::Local::now().naive_local();
@@ -1214,9 +1218,9 @@ impl App {
                     self.research();
                 }
                 self.focus_query = true;
-                self.toast(format!("Not kaydedildi: {name}"), true);
+                self.toast(tf!("Not kaydedildi: {name}", "Note saved: {name}"), true);
             }
-            Err(e) => self.toast(format!("Not kaydedilemedi: {e}"), false),
+            Err(e) => self.toast(tf!("Not kaydedilemedi: {e}", "Could not save the note: {e}"), false),
         }
     }
 
@@ -1231,7 +1235,7 @@ impl App {
         match self.term_choice() {
             Term::Custom => {
                 let n = file_name(self.config.terminal_custom.trim().trim_matches('"'));
-                format!("Başka: {n}")
+                tf!("Başka: {n}", "Other: {n}")
             }
             t => t.label().to_string(),
         }
@@ -1239,7 +1243,7 @@ impl App {
 
     pub fn open_terminal(&mut self) {
         let Some(dir) = self.current_dir() else {
-            self.toast("Önce bir klasöre girin", false);
+            self.toast(t!("Önce bir klasöre girin", "Open a folder first"), false);
             return;
         };
         let env = terminal::Env::current();
@@ -1248,9 +1252,9 @@ impl App {
             Ok(()) => {
                 self.state.add_dest(&dir);
                 self.state.save();
-                self.toast(format!("{} açıldı: {}", t.label(), dir), true);
+                self.toast(tf!("{} açıldı: {}", "{} opened: {}", t.label(), dir), true);
             }
-            Err(e) => self.toast(format!("Terminal açılamadı: {e}"), false),
+            Err(e) => self.toast(tf!("Terminal açılamadı: {e}", "Could not open the terminal: {e}"), false),
         }
     }
 
@@ -1283,12 +1287,12 @@ impl App {
         let Some(p) = self.settings_edit.take() else { return };
         let p = p.trim().trim_matches('"').to_string();
         if p.is_empty() {
-            self.toast("Programın tam yolunu yazın · vazgeçmek için Esc", false);
+            self.toast(t!("Programın tam yolunu yazın · vazgeçmek için Esc", "Type the program's full path · Esc to cancel"), false);
             self.settings_edit = Some(p);
             return;
         }
         if !terminal::valid_custom(&p) {
-            self.toast("Program bulunamadı · tam yolu yazın (ör. C:\\Programlar\\Terminal\\terminal.exe)", false);
+            self.toast(t!("Program bulunamadı · tam yolu yazın (ör. C:\\Programlar\\Terminal\\terminal.exe)", "Program not found · type the full path (e.g. C:\\Programs\\Terminal\\terminal.exe)"), false);
             self.settings_edit = Some(p);
             return;
         }
@@ -1324,7 +1328,7 @@ impl App {
         self.recording = false;
         if !config::valid_hotkey(h) {
             platform::suspend_hotkey(false);
-            self.toast(format!("{} kullanılamaz: Ctrl/Alt ile birlikte ya da F tuşu seçin", h.label()), false);
+            self.toast(tf!("{} kullanılamaz: Ctrl/Alt ile birlikte ya da F tuşu seçin", "{} cannot be used: combine it with Ctrl/Alt or pick an F key", h.label()), false);
             return;
         }
         self.hk_pending = Some(h);
@@ -1336,9 +1340,9 @@ impl App {
         if platform::set_autostart(on, true) {
             self.config.autostart = on;
             self.config.save();
-            self.toast(if on { "Windows açılışında başlayacak" } else { "Windows açılışında başlamayacak" }, true);
+            self.toast(if on { t!("Windows açılışında başlayacak", "Will start with Windows") } else { t!("Windows açılışında başlamayacak", "Will not start with Windows") }, true);
         } else {
-            self.toast("Başlangıç ayarı yazılamadı", false);
+            self.toast(t!("Başlangıç ayarı yazılamadı", "Could not write the startup setting"), false);
         }
     }
 
@@ -1409,7 +1413,7 @@ impl App {
                     }
                     platform::hide(ctx)
                 }
-                Err(e) => self.toast(format!("Gezgin açılamadı: {e}"), false),
+                Err(e) => self.toast(tf!("Gezgin açılamadı: {e}", "Could not open Explorer: {e}"), false),
             }
             return;
         }
@@ -1508,8 +1512,8 @@ impl App {
         if !cfg!(windows) {
             ctx.copy_text(text.clone());
         }
-        let msg = if ts.len() > 1 { format!("{} yol kopyalandı", ts.len()) } else { format!("Yol kopyalandı: {}", ts[0].path) };
-        self.toast(if ok || !cfg!(windows) { msg } else { "Pano kullanılamadı".into() }, ok || !cfg!(windows));
+        let msg = if ts.len() > 1 { tf!("{} yol kopyalandı", "{} paths copied", ts.len()) } else { tf!("Yol kopyalandı: {}", "Path copied: {}", ts[0].path) };
+        self.toast(if ok || !cfg!(windows) { msg } else { t!("Pano kullanılamadı", "Clipboard unavailable").into() }, ok || !cfg!(windows));
     }
 
     /// Kopyala/Kes: yalnızca panoya al (CF_HDROP + kes/kopyala bilgisi). Klasörden çıkılmaz,
@@ -1520,7 +1524,7 @@ impl App {
         }
         let ts = self.targets();
         if ts.is_empty() {
-            self.toast("Önce bir öğe seçin", false);
+            self.toast(t!("Önce bir öğe seçin", "Select an item first"), false);
             return;
         }
         let srcs: Vec<String> = ts.iter().map(|i| i.path.clone()).collect();
@@ -1530,12 +1534,12 @@ impl App {
         if !cfg!(windows) {
             ctx.copy_text(srcs.join("\n"));
         }
-        let verb = if cut { "Kesildi" } else { "Kopyalandı" };
+        let verb = if cut { t!("Kesildi", "Cut") } else { t!("Kopyalandı", "Copied") };
         let more = if srcs.len() > 1 { format!(" +{}", srcs.len() - 1) } else { String::new() };
         if ok || !cfg!(windows) {
-            self.toast(format!("{verb} · {}{more}", ts[0].name), true);
+            self.toast(tf!("{verb} · {}{more}", "{verb} · {}{more}", ts[0].name), true);
         } else {
-            self.toast(format!("{verb} · {}{more} (Windows panosu kullanılamadı; yalnızca Fastplorer içinde yapıştırılabilir)", ts[0].name), false);
+            self.toast(tf!("{verb} · {}{more} (Windows panosu kullanılamadı; yalnızca Fastplorer içinde yapıştırılabilir)", "{verb} · {}{more} (Windows clipboard unavailable; can only be pasted inside Fastplorer)", ts[0].name), false);
         }
     }
 
@@ -1546,15 +1550,15 @@ impl App {
         }
         let ts = self.targets();
         if ts.is_empty() {
-            self.toast("Önce bir öğe seçin", false);
+            self.toast(t!("Önce bir öğe seçin", "Select an item first"), false);
             return;
         }
         let paths: Vec<String> = ts.iter().map(|i| i.path.clone()).collect();
-        let line = if ts.len() == 1 { format!("\"{}\"", ts[0].name) } else { format!("\"{}\" ve {} öğe daha", ts[0].name, ts.len() - 1) };
+        let line = if ts.len() == 1 { format!("\"{}\"", ts[0].name) } else { tf!("\"{}\" ve {} öğe daha", "\"{}\" and {} more", ts[0].name, ts.len() - 1) };
         self.confirm = Some(Confirm {
-            title: format!("{} öğe Geri Dönüşüm Kutusu'na gönderilsin mi?", ts.len()),
-            lines: vec![line, "Geri Dönüşüm Kutusu'ndan geri alınabilir.".into()],
-            buttons: vec!["Gönder", "Vazgeç"],
+            title: tf!("{} öğe Geri Dönüşüm Kutusu'na gönderilsin mi?", "Move {} items to the Recycle Bin?", ts.len()),
+            lines: vec![line, t!("Geri Dönüşüm Kutusu'ndan geri alınabilir.", "They can be restored from the Recycle Bin.").into()],
+            buttons: vec![t!("Gönder", "Move"), t!("Vazgeç", "Cancel")],
             sel: 0,
             kind: CKind::Delete { paths },
         });
@@ -1562,7 +1566,7 @@ impl App {
 
     fn do_delete(&mut self, paths: Vec<String>) {
         if self.busy_op {
-            self.toast("Önceki işlem sürüyor", false);
+            self.toast(t!("Önceki işlem sürüyor", "The previous operation is still running"), false);
             return;
         }
         self.busy_op = true;
@@ -1583,7 +1587,7 @@ impl App {
                     for p in &paths {
                         ix.remove_path(p);
                     }
-                    if n == 1 { format!("Geri Dönüşüm Kutusu'na gönderildi: {}", file_name(&paths[0])) } else { format!("{n} öğe Geri Dönüşüm Kutusu'na gönderildi") }
+                    if n == 1 { tf!("Geri Dönüşüm Kutusu'na gönderildi: {}", "Moved to the Recycle Bin: {}", file_name(&paths[0])) } else { tf!("{n} öğe Geri Dönüşüm Kutusu'na gönderildi", "{n} items moved to the Recycle Bin") }
                 }
                 Err(e) => e.clone(),
             };
@@ -1605,7 +1609,7 @@ impl App {
             return;
         }
         let Some(dir) = self.current_dir() else {
-            self.toast("Önce bir klasöre girin", false);
+            self.toast(t!("Önce bir klasöre girin", "Open a folder first"), false);
             return;
         };
         self.marked.clear();
@@ -1643,7 +1647,7 @@ impl App {
     /// Kopyala/taşı. `policy`: None = sor, Some(true) = üzerine yaz, Some(false) = yeni adla.
     fn transfer(&mut self, srcs: Vec<String>, dest: String, cut: bool, policy: Option<bool>) {
         if self.busy_op {
-            self.toast("Önceki işlem sürüyor", false);
+            self.toast(t!("Önceki işlem sürüyor", "The previous operation is still running"), false);
             return;
         }
         let dd = PathBuf::from(&dest);
@@ -1654,9 +1658,9 @@ impl App {
         if conflict && policy.is_none() {
             let n = srcs.iter().find(|s| dd.join(file_name(s)).exists()).map(|s| file_name(s)).unwrap_or_default();
             self.confirm = Some(Confirm {
-                title: "Aynı adda öğe var".into(),
-                lines: vec![format!("\"{n}\" hedefte zaten var:"), dest.clone()],
-                buttons: vec!["Üzerine yaz", "Yeni adla", "İptal"],
+                title: t!("Aynı adda öğe var", "An item with the same name exists").into(),
+                lines: vec![tf!("\"{n}\" hedefte zaten var:", "\"{n}\" already exists at the destination:"), dest.clone()],
+                buttons: vec![t!("Üzerine yaz", "Overwrite"), t!("Yeni adla", "Keep both"), t!("İptal", "Cancel")],
                 sel: 1,
                 kind: CKind::Transfer { srcs, dest, cut },
             });
@@ -1679,7 +1683,7 @@ impl App {
                 let mut over = false;
                 if t == sp {
                     if cut {
-                        err = "Kaynak zaten bu klasörde".into();
+                        err = t!("Kaynak zaten bu klasörde", "The source is already in this folder").into();
                         continue;
                     }
                     t = ops::unique_name(&dd, &file_name(s));
@@ -1691,7 +1695,7 @@ impl App {
                     }
                 }
                 if t.starts_with(sp) {
-                    err = "Klasör kendi içine taşınamaz/kopyalanamaz".into();
+                    err = t!("Klasör kendi içine taşınamaz/kopyalanamaz", "A folder cannot be moved/copied into itself").into();
                     continue;
                 }
                 match ops::transfer(sp, &t, cut, over) {
@@ -1711,14 +1715,14 @@ impl App {
                     }
                 }
             }
-            let verb = if cut { "Taşındı" } else { "Kopyalandı" };
+            let verb = if cut { t!("Taşındı", "Moved") } else { t!("Kopyalandı", "Copied") };
             let msg = if err.is_empty() {
                 let n = done.first().map(|d| file_name(&d.0)).unwrap_or_default();
-                format!("{verb}: {n} · hedef: {}", dd.display())
+                tf!("{verb}: {n} · hedef: {}", "{verb}: {n} · destination: {}", dd.display())
             } else if ok > 0 {
-                format!("{ok} öğe {}; hata: {err}", verb.to_lowercase())
+                tf!("{ok} öğe {}; hata: {err}", "{ok} items {}; error: {err}", verb.to_lowercase())
             } else {
-                format!("Hata: {err}")
+                tf!("Hata: {err}", "Error: {err}")
             };
             let _ = tx.send(OpDone {
                 msg,
@@ -1735,12 +1739,12 @@ impl App {
             _ => self.selected().and_then(|i| if i.is_dir { Some(i.path.clone()) } else { parent_of(&i.path) }),
         };
         let Some(dest) = dest else {
-            self.toast("Yapıştırmak için bir klasöre girin ya da bir klasör seçin", false);
+            self.toast(t!("Yapıştırmak için bir klasöre girin ya da bir klasör seçin", "Open or select a folder to paste into"), false);
             return;
         };
         let src = ops::get_clipboard_files().or_else(|| self.clip.clone());
         let Some((paths, cut)) = src else {
-            self.toast("Panoda dosya yok (önce Ctrl+C / Ctrl+X)", false);
+            self.toast(t!("Panoda dosya yok (önce Ctrl+C / Ctrl+X)", "No files on the clipboard (Ctrl+C / Ctrl+X first)"), false);
             return;
         };
         self.transfer(paths, dest, cut, None);
@@ -1748,7 +1752,7 @@ impl App {
 
     fn start_rename(&mut self) {
         let Some(it) = self.selected().filter(|i| i.path != crate::recycle::VIRTUAL_PATH).cloned() else {
-            self.toast("Önce bir öğe seçin", false);
+            self.toast(t!("Önce bir öğe seçin", "Select an item first"), false);
             return;
         };
         match self.mode {
@@ -1776,7 +1780,7 @@ impl App {
                     return;
                 }
                 if !util::valid_name(&name) {
-                    self.toast("Geçersiz ad (şunlar kullanılamaz: < > : \" / \\ | ? *)", false);
+                    self.toast(t!("Geçersiz ad (şunlar kullanılamaz: < > : \" / \\ | ? *)", "Invalid name (these cannot be used: < > : \" / \\ | ? *)"), false);
                     self.edit = Some(e);
                     return;
                 }
@@ -1785,9 +1789,9 @@ impl App {
                     // var olan öğe: onay sor (oraya gidilsin mi?)
                     self.edit = Some(e);
                     self.confirm = Some(Confirm {
-                        title: "Bu adda bir öğe zaten var".into(),
-                        lines: vec![format!("\"{name}\" bu klasörde zaten var:"), dir.clone(), "Var olan öğe seçilsin mi?".into()],
-                        buttons: vec!["Var olanı seç", "Başka ad yaz"],
+                        title: t!("Bu adda bir öğe zaten var", "An item with this name already exists").into(),
+                        lines: vec![tf!("\"{name}\" bu klasörde zaten var:", "\"{name}\" already exists in this folder:"), dir.clone(), t!("Var olan öğe seçilsin mi?", "Select the existing item?").into()],
+                        buttons: vec![t!("Var olanı seç", "Select existing"), t!("Başka ad yaz", "Type another name")],
                         sel: 1,
                         kind: CKind::NewExists { path: target.to_string_lossy().to_string() },
                     });
@@ -1798,12 +1802,12 @@ impl App {
                 }
                 match self.create_new(&dir, &name) {
                     Ok(path) => {
-                        let kind = if new_item_is_file(&name) { "Dosya" } else { "Klasör" };
-                        self.toast(format!("{kind} oluşturuldu: {name}"), true);
+                        let kind = if new_item_is_file(&name) { t!("Dosya", "File") } else { t!("Klasör", "Folder") };
+                        self.toast(tf!("{kind} oluşturuldu: {name}", "{kind} created: {name}"), true);
                         self.reselect = Some(path);
                         self.research();
                     }
-                    Err(err) => self.toast(format!("Oluşturulamadı: {err}"), false),
+                    Err(err) => self.toast(tf!("Oluşturulamadı: {err}", "Could not create: {err}"), false),
                 }
             }
             EditKind::Rename { ref path } => {
@@ -1814,21 +1818,21 @@ impl App {
                     return;
                 }
                 if !util::valid_name(&new) {
-                    self.toast("Geçersiz ad (şunlar kullanılamaz: < > : \" / \\ | ? *)", false);
+                    self.toast(t!("Geçersiz ad (şunlar kullanılamaz: < > : \" / \\ | ? *)", "Invalid name (these cannot be used: < > : \" / \\ | ? *)"), false);
                     self.edit = Some(e);
                     return;
                 }
                 let to = Path::new(&path).with_file_name(&new).to_string_lossy().to_string();
                 if Path::new(&to).exists() && util::fold(&new) != util::fold(&old) {
                     if Path::new(&to).is_dir() || Path::new(&path).is_dir() {
-                        self.toast("Bu adda bir öğe zaten var", false);
+                        self.toast(t!("Bu adda bir öğe zaten var", "An item with this name already exists"), false);
                         self.edit = Some(e);
                         return;
                     }
                     self.confirm = Some(Confirm {
-                        title: "Üzerine yazılsın mı?".into(),
-                        lines: vec![format!("\"{new}\" adında bir dosya zaten var."), "Var olan dosya silinip yerine bu dosya konacak.".into()],
-                        buttons: vec!["Üzerine yaz", "İptal"],
+                        title: t!("Üzerine yazılsın mı?", "Overwrite?").into(),
+                        lines: vec![tf!("\"{new}\" adında bir dosya zaten var.", "A file named \"{new}\" already exists."), t!("Var olan dosya silinip yerine bu dosya konacak.", "The existing file will be replaced by this one.").into()],
+                        buttons: vec![t!("Üzerine yaz", "Overwrite"), t!("İptal", "Cancel")],
                         sel: 1,
                         kind: CKind::RenameOverwrite { from: path, to },
                     });
@@ -1840,15 +1844,15 @@ impl App {
                 let target = target.clone();
                 let alias = bin::sanitize_alias(&e.text);
                 if alias.is_empty() {
-                    self.toast("Geçersiz takma ad", false);
+                    self.toast(t!("Geçersiz takma ad", "Invalid alias"), false);
                     self.edit = Some(e);
                     return;
                 }
                 if bin::exists(&alias) {
                     self.confirm = Some(Confirm {
-                        title: "Takma ad kullanımda".into(),
-                        lines: vec![format!("\"{alias}\" zaten var. Yeni hedefle değiştirilsin mi?")],
-                        buttons: vec!["Değiştir", "İptal"],
+                        title: t!("Takma ad kullanımda", "Alias in use").into(),
+                        lines: vec![tf!("\"{alias}\" zaten var. Yeni hedefle değiştirilsin mi?", "\"{alias}\" already exists. Replace it with the new target?")],
+                        buttons: vec![t!("Değiştir", "Replace"), t!("İptal", "Cancel")],
                         sel: 1,
                         kind: CKind::BinOverwrite { alias, target },
                     });
@@ -1863,13 +1867,13 @@ impl App {
                     return;
                 }
                 if bin::exists(&new) {
-                    self.toast("Bu takma ad zaten var", false);
+                    self.toast(t!("Bu takma ad zaten var", "This alias already exists"), false);
                     self.edit = Some(e);
                     return;
                 }
                 match bin::rename(&old, &new) {
-                    Ok(()) => self.toast(format!("Takma ad değişti: {new} (eski: {old})"), true),
-                    Err(err) => self.toast(format!("Değiştirilemedi: {err}"), false),
+                    Ok(()) => self.toast(tf!("Takma ad değişti: {new} (eski: {old})", "Alias changed: {new} (was: {old})"), true),
+                    Err(err) => self.toast(tf!("Değiştirilemedi: {err}", "Could not change: {err}"), false),
                 }
                 self.local_list();
             }
@@ -1900,17 +1904,17 @@ impl App {
                     }
                 }
                 self.state.save();
-                self.toast(format!("Yeni ad: {new}"), true);
+                self.toast(tf!("Yeni ad: {new}", "New name: {new}"), true);
                 self.pkey = 0;
                 self.request_preview();
             }
-            Err(e) => self.toast(format!("Ad değiştirilemedi: {e}"), false),
+            Err(e) => self.toast(tf!("Ad değiştirilemedi: {e}", "Could not rename: {e}"), false),
         }
     }
 
     fn start_bin_add(&mut self) {
         let Some(it) = self.selected().cloned() else {
-            self.toast("Önce bir öğe seçin", false);
+            self.toast(t!("Önce bir öğe seçin", "Select an item first"), false);
             return;
         };
         if self.mode != Mode::Search {
@@ -1924,23 +1928,23 @@ impl App {
     fn do_bin_add(&mut self, alias: &str, target: &str) {
         match bin::add(alias, target) {
             Ok(_) => {
-                self.toast(format!("Bin'e eklendi: terminalde \"{alias}\" yazarak açabilirsiniz"), true);
+                self.toast(tf!("Bin'e eklendi: terminalde \"{alias}\" yazarak açabilirsiniz", "Added to Bin: type \"{alias}\" in a terminal to open it"), true);
                 if !bin::on_path() {
                     self.ask_path();
                 }
             }
-            Err(e) => self.toast(format!("Eklenemedi: {e}"), false),
+            Err(e) => self.toast(tf!("Eklenemedi: {e}", "Could not add: {e}"), false),
         }
     }
 
     fn ask_path(&mut self) {
         self.confirm = Some(Confirm {
-            title: "Bin klasörü PATH'e eklensin mi?".into(),
+            title: t!("Bin klasörü PATH'e eklensin mi?", "Add the Bin folder to PATH?").into(),
             lines: vec![
                 bin::bin_dir().to_string_lossy().to_string(),
-                "Eklenirse yeni açılan terminallerde takma adlar çalışır.".into(),
+                t!("Eklenirse yeni açılan terminallerde takma adlar çalışır.", "If added, aliases work in newly opened terminals.").into(),
             ],
-            buttons: vec!["PATH'e ekle", "Şimdi değil"],
+            buttons: vec![t!("PATH'e ekle", "Add to PATH"), t!("Şimdi değil", "Not now")],
             sel: 0,
             kind: CKind::AddPath,
         });
@@ -1958,13 +1962,13 @@ impl App {
             CKind::Transfer { srcs, dest, cut } => match b {
                 0 => self.transfer(srcs, dest, cut, Some(true)),
                 1 => self.transfer(srcs, dest, cut, Some(false)),
-                _ => self.toast("İptal edildi", true),
+                _ => self.toast(t!("İptal edildi", "Cancelled"), true),
             },
             CKind::BinRemove { alias } => {
                 if b == 0 {
                     match bin::remove(&alias) {
-                        Ok(()) => self.toast(format!("Kaldırıldı: {alias} (dosyanın kendisi silinmedi)"), true),
-                        Err(e) => self.toast(format!("Kaldırılamadı: {e}"), false),
+                        Ok(()) => self.toast(tf!("Kaldırıldı: {alias} (dosyanın kendisi silinmedi)", "Removed: {alias} (the file itself was not deleted)"), true),
+                        Err(e) => self.toast(tf!("Kaldırılamadı: {e}", "Could not remove: {e}"), false),
                     }
                     self.local_list();
                 }
@@ -1990,7 +1994,7 @@ impl App {
             CKind::AddPath => {
                 if b == 0 {
                     match bin::add_to_path() {
-                        Ok(()) => self.toast("PATH güncellendi. Yeni terminallerde geçerli.", true),
+                        Ok(()) => self.toast(t!("PATH güncellendi. Yeni terminallerde geçerli.", "PATH updated. Applies to new terminals."), true),
                         Err(e) => self.toast(e, false),
                     }
                 }
@@ -2013,7 +2017,7 @@ impl App {
         if !show || items.iter().any(|i| i.path == crate::recycle::VIRTUAL_PATH) {
             return;
         }
-        items.insert(0, Item { name: crate::recycle::TITLE.into(), path: crate::recycle::VIRTUAL_PATH.into(), is_dir: true, ..Default::default() });
+        items.insert(0, Item { name: crate::recycle::title().into(), path: crate::recycle::VIRTUAL_PATH.into(), is_dir: true, ..Default::default() });
     }
 
     /// Gözatılan klasör Masaüstü mü?
@@ -2049,14 +2053,14 @@ impl App {
         self.preview_open = false;
         self.enter_mode(Mode::Trash);
         if crate::recycle::bin_dirs().is_empty() && cfg!(windows) {
-            self.toast("Geri Dönüşüm Kutusu okunamadı", false);
+            self.toast(t!("Geri Dönüşüm Kutusu okunamadı", "Could not read the Recycle Bin"), false);
         }
     }
 
     /// Seçili silinmiş öğeyi özgün yerine geri yükle (asla üzerine yazmaz).
     fn restore_selected(&mut self) {
         let Some(e) = self.trash_sel().cloned() else {
-            self.toast("Önce geri yüklenecek öğeyi seçin", false);
+            self.toast(t!("Önce geri yüklenecek öğeyi seçin", "Select the item to restore first"), false);
             return;
         };
         match crate::recycle::restore(&e) {
@@ -2066,10 +2070,10 @@ impl App {
                 // seçim bir sonraki öğeye geçsin
                 self.reselect = self.items.get(self.sel + 1).or_else(|| self.sel.checked_sub(1).and_then(|i| self.items.get(i))).map(|i| i.path.clone());
                 let renamed = file_name(&t) != e.name();
-                self.toast(if renamed { format!("Geri yüklendi (ad dolu olduğu için yeni adla): {t}") } else { format!("Geri yüklendi: {t}") }, true);
+                self.toast(if renamed { tf!("Geri yüklendi (ad dolu olduğu için yeni adla): {t}", "Restored (under a new name because the name was taken): {t}") } else { tf!("Geri yüklendi: {t}", "Restored: {t}") }, true);
                 self.research();
             }
-            Err(x) => self.toast(format!("Geri yüklenemedi: {x}"), false),
+            Err(x) => self.toast(tf!("Geri yüklenemedi: {x}", "Could not restore: {x}"), false),
         }
     }
 
@@ -2117,7 +2121,7 @@ impl App {
             if typed.chars().all(|c| c.is_alphanumeric()) {
                 self.ext = Some(typed);
             } else {
-                self.toast("Geçersiz uzantı", false);
+                self.toast(t!("Geçersiz uzantı", "Invalid extension"), false);
             }
         }
         self.focus_query = true;
@@ -2128,22 +2132,22 @@ impl App {
     fn trash_menu(&self) -> Vec<MEntry> {
         let it = |key, label, short, act| MEntry::Item(MItem { key, label, short, act });
         if self.trash_sel().is_none() {
-            return vec![it('e', "Gezgin'de aç", "", Act::TrashExplorer)];
+            return vec![it('e', t!("Gezgin'de aç", "Open in Explorer"), "", Act::TrashExplorer)];
         }
         vec![
-            it('g', "Geri yükle", "", Act::Restore),
-            it('a', "Aç", "Enter", Act::Open),
-            it('o', "Özgün klasörü aç", "", Act::OrigReveal),
+            it(k('g', 'r'), t!("Geri yükle", "Restore"), "", Act::Restore),
+            it(k('a', 'o'), t!("Aç", "Open"), "Enter", Act::Open),
+            it(k('o', 'f'), t!("Özgün klasörü aç", "Open original folder"), "", Act::OrigReveal),
             MEntry::Sep,
-            it('p', "Özgün yolu kopyala", "", Act::OrigPath),
-            it('e', "Gezgin'de aç", "", Act::TrashExplorer),
+            it('p', t!("Özgün yolu kopyala", "Copy original path"), "", Act::OrigPath),
+            it('e', t!("Gezgin'de aç", "Open in Explorer"), "", Act::TrashExplorer),
         ]
     }
 
     /// Sanal "Geri Dönüşüm Kutusu" öğesinin menüsü.
     fn trash_entry_menu(&self) -> Vec<MEntry> {
         let it = |key, label, short, act| MEntry::Item(MItem { key, label, short, act });
-        vec![it('a', "Aç", "Enter", Act::Open), it('e', "Gezgin'de aç", "Alt+Enter", Act::Reveal)]
+        vec![it(k('a', 'o'), t!("Aç", "Open"), "Enter", Act::Open), it('e', t!("Gezgin'de aç", "Open in Explorer"), "Alt+Enter", Act::Reveal)]
     }
 
     pub fn tab_menu(&self) -> Vec<MEntry> {
@@ -2157,30 +2161,30 @@ impl App {
         let sc = |key, label, short, act| MEntry::Item(MItem { key, label, short, act });
         if self.mode == Mode::Bin && self.items.is_empty() {
             // boş Bin: öğe işlemleri yok; genel işlemler (önceki klasörde çalışır)
-            return vec![it('n', "Yeni", Act::New), MEntry::Sep, it('h', "PATH'e ekle", Act::AddPath), it('g', "Son hedefler", Act::Dests)];
+            return vec![it('n', t!("Yeni", "New"), Act::New), MEntry::Sep, it(k('h', 'p'), t!("PATH'e ekle", "Add to PATH"), Act::AddPath), it(k('g', 'f'), t!("Son hedefler", "Recent folders"), Act::Dests)];
         }
         if self.mode == Mode::Bin {
-            return vec![it('r', "Yeniden adlandır", Act::BinRename), it('d', "Kaldır", Act::BinRemove), it('a', "Hedefi aç", Act::Open), it('e', "Gezgin'de göster", Act::Reveal), MEntry::Sep, it('h', "PATH'e ekle", Act::AddPath)];
+            return vec![it('r', t!("Yeniden adlandır", "Rename"), Act::BinRename), it('d', t!("Kaldır", "Remove"), Act::BinRemove), it(k('a', 'o'), t!("Hedefi aç", "Open target"), Act::Open), it('e', t!("Gezgin'de göster", "Show in Explorer"), Act::Reveal), MEntry::Sep, it(k('h', 'p'), t!("PATH'e ekle", "Add to PATH"), Act::AddPath)];
         }
-        let mut v = vec![sc(' ', if self.multi { "Çoklu seçimi kapat" } else { "Çoklu seçim" }, "Ctrl+M", Act::Multi)];
+        let mut v = vec![sc(' ', if self.multi { t!("Çoklu seçimi kapat", "Turn off multi-select") } else { t!("Çoklu seçim", "Multi-select") }, "Ctrl+M", Act::Multi)];
         if self.multi {
-            v.push(sc('o', "Seçilenleri aç", "Enter", Act::OpenAll));
-            v.push(sc('t', "Tümünü seç", "Ctrl+A", Act::SelectAll));
+            v.push(sc('o', t!("Seçilenleri aç", "Open selected"), "Enter", Act::OpenAll));
+            v.push(sc(k('t', 'a'), t!("Tümünü seç", "Select all"), "Ctrl+A", Act::SelectAll));
         }
         v.push(MEntry::Sep);
         v.extend([
-            it('c', "Kopyala", Act::Copy),
-            it('x', "Kes", Act::Cut),
-            it('v', "Yapıştır", Act::Paste),
-            it('n', "Yeni", Act::New),
-            it('r', "Yeniden adlandır", Act::Rename),
-            it('d', "Geri Dönüşüm Kutusu'na gönder", Act::Delete),
-            it('b', "Bin'e yolla", Act::Bin),
-            it('p', "Yolu kopyala", Act::CopyPath),
+            it('c', t!("Kopyala", "Copy"), Act::Copy),
+            it('x', t!("Kes", "Cut"), Act::Cut),
+            it('v', t!("Yapıştır", "Paste"), Act::Paste),
+            it('n', t!("Yeni", "New"), Act::New),
+            it('r', t!("Yeniden adlandır", "Rename"), Act::Rename),
+            it('d', t!("Geri Dönüşüm Kutusu'na gönder", "Move to Recycle Bin"), Act::Delete),
+            it('b', t!("Bin'e yolla", "Send to Bin"), Act::Bin),
+            it('p', t!("Yolu kopyala", "Copy path"), Act::CopyPath),
             MEntry::Sep,
-            it('g', "Son hedefler", Act::Dests),
-            it('m', "Bin yöneticisi", Act::BinMgr),
-            it('k', "Panoyu temizle", Act::ClearClip),
+            it(k('g', 'f'), t!("Son hedefler", "Recent folders"), Act::Dests),
+            it('m', t!("Bin yöneticisi", "Bin manager"), Act::BinMgr),
+            it(k('k', 'l'), t!("Panoyu temizle", "Clear clipboard"), Act::ClearClip),
         ]);
         v
     }
@@ -2196,45 +2200,45 @@ impl App {
         }
         let it = |key, label, short, act| MEntry::Item(MItem { key, label, short, act });
         if self.mode == Mode::Bin && self.items.is_empty() {
-            return vec![it('n', "Yeni", "", Act::New), MEntry::Sep, it('h', "PATH'e ekle", "", Act::AddPath), it('g', "Son hedefler", "", Act::Dests)];
+            return vec![it('n', t!("Yeni", "New"), "", Act::New), MEntry::Sep, it(k('h', 'p'), t!("PATH'e ekle", "Add to PATH"), "", Act::AddPath), it(k('g', 'f'), t!("Son hedefler", "Recent folders"), "", Act::Dests)];
         }
         if self.mode == Mode::Bin {
             return vec![
-                it('a', "Hedefi aç", "Enter", Act::Open),
-                it('e', "Gezgin'de göster", "Alt+Enter", Act::Reveal),
+                it(k('a', 'o'), t!("Hedefi aç", "Open target"), "Enter", Act::Open),
+                it('e', t!("Gezgin'de göster", "Show in Explorer"), "Alt+Enter", Act::Reveal),
                 MEntry::Sep,
-                it('r', "Yeniden adlandır", "F2", Act::BinRename),
-                it('d', "Kaldır", "Del", Act::BinRemove),
+                it('r', t!("Yeniden adlandır", "Rename"), "F2", Act::BinRename),
+                it('d', t!("Kaldır", "Remove"), "Del", Act::BinRemove),
                 MEntry::Sep,
-                it('h', "PATH'e ekle", "", Act::AddPath),
+                it(k('h', 'p'), t!("PATH'e ekle", "Add to PATH"), "", Act::AddPath),
             ];
         }
         let mut v = vec![
-            it('a', "Aç", "Enter", Act::Open),
-            it('o', "Önizle", "Shift+Space", Act::Preview),
-            it('e', "Explorer'da aç", "Alt+Enter", Act::Reveal),
+            it(k('a', 'o'), t!("Aç", "Open"), "Enter", Act::Open),
+            it(k('o', 'w'), t!("Önizle", "Preview"), "Shift+Space", Act::Preview),
+            it('e', t!("Explorer'da aç", "Show in Explorer"), "Alt+Enter", Act::Reveal),
             MEntry::Sep,
-            it(' ', if self.multi { "Çoklu seçimi kapat" } else { "Çoklu seçim" }, "Ctrl+M", Act::Multi),
+            it(' ', if self.multi { t!("Çoklu seçimi kapat", "Turn off multi-select") } else { t!("Çoklu seçim", "Multi-select") }, "Ctrl+M", Act::Multi),
         ];
         if self.multi {
-            v.push(it('s', "Seçilenleri aç", "", Act::OpenAll));
-            v.push(it('t', "Tümünü seç", "Ctrl+A", Act::SelectAll));
+            v.push(it('s', t!("Seçilenleri aç", "Open selected"), "", Act::OpenAll));
+            v.push(it(k('t', 'a'), t!("Tümünü seç", "Select all"), "Ctrl+A", Act::SelectAll));
         }
         v.extend([
             MEntry::Sep,
-            it('c', "Kopyala", "Ctrl+C", Act::Copy),
-            it('x', "Kes", "Ctrl+X", Act::Cut),
-            it('v', "Yapıştır", "Ctrl+V", Act::Paste),
-            it('r', "Yeniden adlandır", "F2", Act::Rename),
-            it('p', "Yolu kopyala", "Ctrl+Shift+C", Act::CopyPath),
-            it('n', "Yeni", "", Act::New),
-            it('d', "Geri Dönüşüm Kutusu'na gönder", "Del", Act::Delete),
-            it('b', "Bin'e yolla", "", Act::Bin),
+            it('c', t!("Kopyala", "Copy"), "Ctrl+C", Act::Copy),
+            it('x', t!("Kes", "Cut"), "Ctrl+X", Act::Cut),
+            it('v', t!("Yapıştır", "Paste"), "Ctrl+V", Act::Paste),
+            it('r', t!("Yeniden adlandır", "Rename"), "F2", Act::Rename),
+            it('p', t!("Yolu kopyala", "Copy path"), "Ctrl+Shift+C", Act::CopyPath),
+            it('n', t!("Yeni", "New"), "", Act::New),
+            it('d', t!("Geri Dönüşüm Kutusu'na gönder", "Move to Recycle Bin"), "Del", Act::Delete),
+            it('b', t!("Bin'e yolla", "Send to Bin"), "", Act::Bin),
             MEntry::Sep,
-            it('g', "Son hedefler", "", Act::Dests),
-            it('m', "Bin yöneticisi", "", Act::BinMgr),
-            it('k', "Panoyu temizle", "", Act::ClearClip),
-            it('y', "Yenile", "F5", Act::Refresh),
+            it(k('g', 'f'), t!("Son hedefler", "Recent folders"), "", Act::Dests),
+            it('m', t!("Bin yöneticisi", "Bin manager"), "", Act::BinMgr),
+            it(k('k', 'l'), t!("Panoyu temizle", "Clear clipboard"), "", Act::ClearClip),
+            it(k('y', 'u'), t!("Yenile", "Refresh"), "F5", Act::Refresh),
         ]);
         v
     }
@@ -2725,7 +2729,7 @@ impl App {
                         }
                         self.apply_hotkey(Hotkey { mods, vk });
                     }
-                    None => self.toast("Bu tuş kısayol olarak kullanılamaz", false),
+                    None => self.toast(t!("Bu tuş kısayol olarak kullanılamaz", "This key cannot be used as a shortcut"), false),
                 }
             }
             return;
@@ -2777,6 +2781,9 @@ impl App {
         if lr != 0 && self.settings_sel == 2 {
             self.cycle_terminal(lr);
         }
+        if lr != 0 && self.settings_sel == 3 {
+            self.toggle_lang();
+        }
         if ok {
             self.settings_activate(self.settings_sel);
         }
@@ -2790,8 +2797,21 @@ impl App {
         match row {
             0 => self.start_record(),
             1 => self.toggle_autostart(),
+            3 => self.toggle_lang(),
             _ => self.cycle_terminal(1),
         }
+    }
+
+    /// Ayarlar: arayüz dilini değiştir (Türkçe ⇄ English). Hemen uygulanır ve kaydedilir.
+    pub fn toggle_lang(&mut self) {
+        let l = crate::i18n::get().other();
+        crate::i18n::set(l);
+        self.config.lang = l.code().to_string();
+        self.config.save();
+        // dile bağlı listeler (ör. Geri Dönüşüm Kutusu öğesinin adı) yeniden kurulur
+        self.research_keep();
+        self.request_preview();
+        self.toast(t!("Dil: Türkçe", "Language: English"), true);
     }
 
     pub fn esc_state(&self) -> EscState {
@@ -2895,11 +2915,11 @@ impl App {
                     self.hk_pending = None;
                     self.config.hotkey = h;
                     self.config.save();
-                    self.toast(format!("Yeni kısayol: {}", h.label()), true);
+                    self.toast(tf!("Yeni kısayol: {}", "New shortcut: {}", h.label()), true);
                 }
                 Some(false) => {
                     self.hk_pending = None;
-                    self.toast(format!("{} başka bir uygulama tarafından kullanılıyor; {} korunuyor", h.label(), self.config.hotkey.label()), false);
+                    self.toast(tf!("{} başka bir uygulama tarafından kullanılıyor; {} korunuyor", "{} is used by another application; keeping {}", h.label(), self.config.hotkey.label()), false);
                 }
                 None => ctx.request_repaint_after(Duration::from_millis(50)),
             }

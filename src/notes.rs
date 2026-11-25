@@ -34,7 +34,7 @@ pub fn save(dir: &Path, text: &str, t: &chrono::NaiveDateTime) -> std::io::Resul
             Err(e) => return Err(e),
         }
     }
-    Err(std::io::Error::other("uygun dosya adı bulunamadı"))
+    Err(std::io::Error::other(t!("uygun dosya adı bulunamadı", "no free file name found")))
 }
 
 #[cfg(test)]

@@ -35,9 +35,9 @@ impl Term {
         match self {
             Term::WindowsTerminal => "Windows Terminal",
             Term::PowerShell => "PowerShell",
-            Term::Cmd => "Komut İstemi (CMD)",
+            Term::Cmd => t!("Komut İstemi (CMD)", "Command Prompt (CMD)"),
             Term::Hyper => "Hyper",
-            Term::Custom => "Başka bir program",
+            Term::Custom => t!("Başka bir program", "Another program"),
         }
     }
 }
@@ -166,14 +166,14 @@ pub fn build(term: Term, custom: &str, dir: &str, env: &Env) -> Result<Launch, S
         Term::PowerShell => l(system_exe(env, &["WindowsPowerShell", "v1.0"], "powershell.exe"), vec!["-NoExit".into(), "-NoLogo".into()], true),
         Term::Cmd => l(system_exe(env, &[], "cmd.exe"), vec!["/K".into()], true),
         Term::Hyper => {
-            let p = find_hyper(env).ok_or("Hyper bulunamadı")?;
+            let p = find_hyper(env).ok_or(t!("Hyper bulunamadı", "Hyper not found"))?;
             // Hyper'ın kendi "Hyper'ı burada aç" kaydı da klasörü argüman olarak verir
             l(p, vec![dir.into()], false)
         }
         Term::Custom => {
             let c = custom.trim().trim_matches('"');
             if c.is_empty() {
-                return Err("Ayarlar'dan terminal programını seçin".into());
+                return Err(t!("Ayarlar'dan terminal programını seçin", "Choose the terminal program in Settings").into());
             }
             l(PathBuf::from(c), Vec::new(), false)
         }
