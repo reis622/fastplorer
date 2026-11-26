@@ -15,11 +15,31 @@
 ## Özellikler
 
 ### Arama ve modlar (F1)
-Arama kutusunun solundaki çip arama modunu gösterir. **F1**'e basarak ya da çipe tıklayarak modu değiştirirsiniz: **İsim → Uzantı → İçerik → İsim**.
+Arama kutusunun solundaki çip arama modunu gösterir. **F1**'e basarak ya da çipe tıklayarak modu değiştirirsiniz: **İsim → Uzantı → İçerik → İsim**. **Shift+F1** ya da çipe **sağ tık** bir önceki moda döner.
 - **İsim:** Dosya ve klasör adlarında arama yapar (birden çok kelime yazılabilir).
 - **Uzantı:** Bir uzantı yazıp Enter'a basarsınız (ör. `pdf`); sonuçlar o türle sınırlanır. Çipteki ✕ süzgeci kaldırır.
 - **İçerik:** Metin dosyalarının içinde arar. Sonuçlar akarak gelir, en yeni dosyalar önce. Eşleşen satırın numarası ve kendisi görünür.
+- Sonuçlar varsayılan olarak **en iyi eşleşmeye göre** (alaka) sıralanır. İsterseniz aşağıdaki sıralama belirteçleriyle değiştirebilirsiniz.
 - Arama kutusu boşken **son kullanılanlar** listelenir: açtığınız öğeler, Windows'un son kullanılanları ve son değişen dosyalar, tek bir listede.
+
+### Sıralama: `:si` `:da` `:na` (Ctrl+1/2/3)
+Aramanın sonuna bir belirteç yazarak sıralamayı değiştirirsiniz:
+- **`:na`** isme göre (A→Z), **`:si`** boyuta göre (büyükten küçüğe), **`:da`** tarihe göre (yeniden eskiye).
+- Sonuna **`-`** eklemek sırayı ters çevirir: `:na-` (Z→A), `:si-` (küçükten büyüğe), `:da-` (eskiden yeniye).
+- Örnek: `rapor :si` en büyük "rapor" dosyalarını üste getirir. Belirteç klasörün içindeyken de çalışır (arama kutusuna yalnızca `:da-` yazmak gibi).
+- **Ctrl+1 / Ctrl+2 / Ctrl+3** belirteci kendisi ekler (isim / boyut / tarih). Aynı kısayola tekrar basmak sırayı ters çevirir.
+- Kalıcı değildir: belirteci sildiğinizde ya da yeni bir aramaya geçtiğinizde varsayılan sıralamaya dönülür.
+- **Klasör boyutları:** `:si` ile klasörlerin boyutu arka planda hesaplanır. Liste beklemez; boyutlar geldikçe sıralama kendiliğinden güncellenir.
+
+### Komutlar: `/` ile terminalde çalıştır
+Arama kutusuna **`/`** ile başlayan bir şey yazınca Fastplorer onu komut olarak görür. **Enter**, komutu Ayarlar'da seçtiğiniz terminalde (Windows Terminal, PowerShell, CMD …) ayrı bir pencerede çalıştırır. Pencere açık kalır, çıktıyı okuyabilirsiniz. Komut, gezindiğiniz klasörde çalışır; bir klasörde değilseniz kullanıcı klasörünüzde.
+- Örnek: `/ipconfig /all`. Tek `/` ve `-`/`--` seçenekleri komutun parçası olarak kalır.
+- **Birden çok komut (`//`):** Boşluktan sonra gelen `//` yeni bir komut başlatır. Komutlar sırayla çalışır; biri başarısız olursa geri kalanlar çalışmaz.
+  - `/ipconfig /all //dir`
+  - `/git clone https://github.com/kullanici/proje //cd proje //cargo build --release //copy target\release\proje.exe C:\araclar`
+- **Adreslerdeki `//` güvenlidir:** `https://` gibi boşluksuz `//` bölmez, komutun parçası kalır.
+- Komut kartı, çalışacak komutları numaralı satırlar halinde ve çalışacakları klasörle birlikte gösterir.
+- **Hyper ve özel terminaller:** Hyper dışarıdan komut alamadığı için Fastplorer terminali o klasörde açar ve komutu (birden çoksa ` && ` ile birleştirilmiş halde) **panoya kopyalar**. Yapıştırıp Enter'a basmanız yeterli. Ayarlarda seçilen başka bir program için de aynısı yapılır.
 
 ### Klasörlerde gezinme
 - Bir klasörde Enter'a basmak ya da çift tıklamak içine girer. Üstteki yol şeridinde (breadcrumb) her parçaya tıklanabilir.
@@ -50,7 +70,7 @@ Son girdiğiniz ve kullandığınız klasörlerin listesidir. Birini seçince o 
 Bulunduğunuz klasöre hızlıca bir metin notu yazarsınız. Enter kaydeder, Shift+Enter yeni satır açar. Not `not-YYYY-AA-GG-SSDD.txt` adıyla kaydedilir ve hiçbir dosyanın üzerine yazmaz. Esc ile çıkarsanız taslak saklanır.
 
 ### Terminal (Ctrl+T)
-Bulunduğunuz klasörde terminal açar. Ayarlardan seçilebilenler: Windows Terminal, PowerShell, Komut İstemi (CMD), Hyper ya da başka bir program. Ayarlarda yalnızca bilgisayarda bulunanlar listelenir.
+Bulunduğunuz klasörde terminal açar. Ayarlardan seçilebilenler: Windows Terminal, PowerShell, Komut İstemi (CMD), Hyper ya da başka bir program. Ayarlarda yalnızca bilgisayarda bulunanlar listelenir. `/` komutları da bu terminalde çalışır (yukarıya bakın).
 
 ### Önizleme (Shift+Space)
 Seçili öğenin önizlemesini açar: metin ve kod dosyaları (içerik aramasında eşleşen satır vurgulanır), resimler, zip/jar içeriği ve klasör içeriği. Boyut ve tarih bilgisi de gösterilir.
@@ -83,6 +103,9 @@ Alt çubuktaki ipuçlarının hepsi tıklanabilir (Aç, Önizle, İşlem, Not, T
 | F9 (değiştirilebilir) | Pencereyi her yerden aç/kapat |
 | Yazmak | Ara |
 | F1 | Arama modu: İsim → Uzantı → İçerik |
+| Shift+F1 / mod çipine sağ tık | Önceki arama modu |
+| Ctrl+1 / Ctrl+2 / Ctrl+3 | Sırala: isim / boyut / tarih (tekrar basınca ters) |
+| `/komut` + Enter | Komutu terminalde çalıştır (`//` ile birden çok komut) |
 | ↑ / ↓, PageUp / PageDown, Home / End | Listede gezin |
 | Enter | Aç / klasöre gir (çoklu seçimde seçilenlerin hepsini aç) |
 | Alt+Enter | Explorer'da göster |
@@ -131,7 +154,15 @@ cargo test
 - It's a single lightweight `.exe` with no installer.
 
 **Features:**
-- **F1 search modes:** Name, Extension, and Content. Content search streams results newest first, with line numbers.
+- **F1 search modes:** Name, Extension, and Content. Content search streams results newest first, with line numbers. **Shift+F1** or **right-click on the mode chip** goes back one mode.
+- **Sorting:** results are ranked by relevance by default. Add a token at the end of the search: **`:na`** name (A→Z), **`:si`** size (largest first), **`:da`** date (newest first). Add **`-`** to reverse (`:na-`, `:si-`, `:da-`). Example: `report :si`. Tokens also work inside folders. **Ctrl+1 / Ctrl+2 / Ctrl+3** insert the token for you; pressing the same shortcut again reverses it. Sorting is not sticky: remove the token or start a new search and the default order is back.
+- **Folder sizes:** with `:si`, folder sizes are calculated in the background. The list doesn't wait; it re-sorts as sizes arrive.
+- **Commands with `/`:** type something starting with **`/`** and press **Enter** to run it in the terminal chosen in Settings (Windows Terminal, PowerShell, CMD …), in a separate window that stays open. It runs in the folder you are browsing, otherwise in your user folder. Example: `/ipconfig /all`. A single `/` and `-`/`--` flags stay part of the command.
+- **Command chains with `//`:** a `//` after a space starts the next command. Commands run in order and stop if one fails. URLs are safe: `https://` has no space before `//`, so it is not split. Examples:
+  - `/ipconfig /all //dir`
+  - `/git clone https://github.com/user/project //cd project //cargo build --release //copy target\release\project.exe C:\tools`
+  The command card shows the commands as a numbered list together with the folder they will run in.
+- **Hyper and custom terminals:** Hyper can't receive a command from outside, so Fastplorer opens it in the folder and **copies the command to the clipboard** (a chain is joined with ` && `); just paste and press Enter. The same happens for a custom program set in Settings.
 - **Recent items** appear when the search box is empty.
 - **Folder browsing:** newest-modified first, clickable breadcrumb path, Ctrl+← or the mouse back button goes up.
 - **Tab action card and right-click menu:** one-letter keys. The right-click menu also has Open, Preview, Show in Explorer, and Refresh (F5).
@@ -141,7 +172,7 @@ cargo test
 - **Recent destinations** (Tab → g).
 - **Bin manager:** the Bin folder holds small `.cmd` launchers that open files from a terminal by alias. "Add to PATH" makes them work in new terminals.
 - **Quick notes** (Ctrl+N): never overwrite existing files.
-- **Open a terminal here** (Ctrl+T): Windows Terminal, PowerShell, CMD, Hyper, or a custom program.
+- **Open a terminal here** (Ctrl+T): Windows Terminal, PowerShell, CMD, Hyper, or a custom program. `/` commands run in the same terminal.
 - **Preview** (Shift+Space): text/code, images, zip contents, folders.
 - **Recycle Bin view:** search "recycle"/"bin" or browse the Desktop. It lists your deleted items with original folder and deletion date, newest first. **Restore** never overwrites (`name (2).ext`) and recreates missing folders. There is no permanent delete.
 - **Settings** (Ctrl+S or the gear): global hotkey, start with Windows, terminal choice, and **language**.

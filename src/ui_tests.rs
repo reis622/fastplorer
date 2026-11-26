@@ -959,3 +959,265 @@ scenario!(english_ui_has_no_turkish_left, english_ui_has_no_turkish_left_child, 
     assert_eq!(crate::util::fmt_when(crate::util::now_secs()), "just now");
     assert!(seen > 40, "yeterince metin denetlenmeli ({seen})");
 });
+
+fn alt_ctrl() -> Modifiers {
+    Modifiers { ctrl: true, command: true, alt: true, ..Default::default() }
+}
+
+fn click_at(h: &mut H, p: egui::Pos2, button: egui::PointerButton) {
+    h.frame(vec![Event::PointerMoved(p)]);
+    h.frame(vec![Event::PointerButton { pos: p, button, pressed: true, modifiers: Modifiers::NONE }]);
+    h.frame(vec![Event::PointerButton { pos: p, button, pressed: false, modifiers: Modifiers::NONE }]);
+}
+
+#[test]
+fn sort_token_parsing() {
+    assert_eq!(parse_sort("the game :si"), ("the game", Some((SORT_SIZE, true))));
+    assert_eq!(parse_sort("the game :si-"), ("the game", Some((SORT_SIZE, false))));
+    assert_eq!(parse_sort("the game :da"), ("the game", Some((SORT_DATE, true))));
+    assert_eq!(parse_sort("the game :da-"), ("the game", Some((SORT_DATE, false))));
+    assert_eq!(parse_sort("the game :na"), ("the game", Some((SORT_NAME, false))));
+    assert_eq!(parse_sort("the game :NA-"), ("the game", Some((SORT_NAME, true))));
+    assert_eq!(parse_sort(":si"), ("", Some((SORT_SIZE, true))));
+    assert_eq!(parse_sort("  rapor   :si  "), ("  rapor", Some((SORT_SIZE, true))));
+    assert_eq!(parse_sort("şarkı :na"), ("şarkı", Some((SORT_NAME, false))));
+    // belirteç değil
+    assert_eq!(parse_sort("abc:si"), ("abc:si", None));
+    assert_eq!(parse_sort("the game"), ("the game", None));
+    assert_eq!(parse_sort("x :zz"), ("x :zz", None));
+    assert_eq!(parse_sort("x :si--"), ("x :si--", None));
+    assert_eq!(parse_sort(""), ("", None));
+    // Ctrl+1/2/3: ekle, değiştir, aynı tuş "-" ekler/kaldırır
+    assert_eq!(with_sort_token("the game", SORT_SIZE), "the game :si");
+    assert_eq!(with_sort_token("the game :si", SORT_SIZE), "the game :si-");
+    assert_eq!(with_sort_token("the game :si-", SORT_SIZE), "the game :si");
+    assert_eq!(with_sort_token("the game :si-", SORT_NAME), "the game :na");
+    assert_eq!(with_sort_token("the game :na", SORT_NAME), "the game :na-");
+    assert_eq!(with_sort_token("the game ", SORT_DATE), "the game :da");
+    assert_eq!(with_sort_token("", SORT_DATE), ":da");
+    assert_eq!(with_sort_token(":da", SORT_DATE), ":da-");
+}
+
+scenario!(relevance_default_exact_first, relevance_default_exact_first_child, |h| {
+    for p in ["Oyun/game of the year.txt", "Oyun/the gamer notes.txt", "Oyun/the game guide.pdf", "Oyun/endgame the.txt"] {
+        write(&h.root.join(p), "x");
+    }
+    std::fs::create_dir_all(h.root.join("Arsiv/THE GAME")).unwrap();
+    write(&h.root.join("Arsiv/THE GAME/kayit.txt"), "x");
+    h.key(Key::F5, Modifiers::NONE); // yeniden dizinle
+    h.frame(vec![Event::Text("the game".into())]);
+    h.wait("sonuçlar", |a| a.query == "the game" && !a.waiting && a.items.iter().any(|i| i.name == "THE GAME"));
+    assert_eq!(h.app.sort_spec(), None, "varsayılan: sıralama yok");
+    assert_eq!(h.names()[0], "THE GAME", "birebir eşleşen klasör en üstte: {:?}", h.names());
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().filter(|s| *s == "Sırala").count() == 1 && !t.iter().any(|s| s == "İsim ↑" || s == "Boyut" || s == "Tarih"), "arama kutusunda sıralama çipi yok (alt çubukta yalnızca ipucu): {t:?}");
+});
+
+scenario!(sort_tokens_folder_and_not_sticky, sort_tokens_folder_and_not_sticky_child, |h| {
+    let d = h.root.join("Sirali");
+    let now = std::time::SystemTime::now();
+    for (n, size, ago) in [("b-orta.txt", 50usize, 200u64), ("a-kucuk.txt", 5, 100), ("C-buyuk.txt", 500, 300)] {
+        write(&d.join(n), &"x".repeat(size));
+        let f = std::fs::File::options().write(true).open(d.join(n)).unwrap();
+        f.set_modified(now - Duration::from_secs(ago * 3600)).unwrap();
+    }
+    write(&d.join("klasor/alt/ic.bin"), &"x".repeat(2000));
+    let dir = d.to_string_lossy().to_string();
+    h.app.enter_browse(&dir);
+    h.wait("liste", |a| a.items.len() == 4);
+    assert_eq!(h.names()[0], "klasor", "varsayılan: klasörler önce");
+    // ":si" yalnız (boş arama + belirteç): klasör listesi boyuta göre; klasör boyutu arka planda
+    h.frame(vec![Event::Text(":si".into())]);
+    h.wait("klasör boyutu", |a| a.dirs.get(&d.join("klasor").to_string_lossy()).is_some() && a.items.len() == 4 && a.items[0].name == "klasor");
+    assert_eq!(h.app.sort_spec(), Some((SORT_SIZE, true)));
+    assert_eq!(h.names(), ["klasor", "C-buyuk.txt", "b-orta.txt", "a-kucuk.txt"], ":si klasör ve dosyaları birlikte boyuta göre dizer");
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| *s == crate::util::fmt_size(2000)), "klasör satırında hesaplanan boyut: {t:?}");
+    // Ctrl+2 aynı belirteçte "-" ekler: küçükten
+    h.key(Key::Num2, ctrl());
+    h.frame(vec![]);
+    assert_eq!(h.app.query, ":si-");
+    h.wait("küçükten", |a| a.items.len() == 4 && a.items[0].name == "a-kucuk.txt");
+    assert_eq!(h.names(), ["a-kucuk.txt", "b-orta.txt", "C-buyuk.txt", "klasor"]);
+    // Ctrl+1: ":na" (A→Z, klasörler önce)
+    h.key(Key::Num1, ctrl());
+    h.frame(vec![]);
+    assert_eq!(h.app.query, ":na");
+    h.wait("isim", |a| a.items.len() == 4 && a.items[1].name == "a-kucuk.txt");
+    assert_eq!(h.names(), ["klasor", "a-kucuk.txt", "b-orta.txt", "C-buyuk.txt"]);
+    // Ctrl+3: ":da" (yeniden)
+    h.key(Key::Num3, ctrl());
+    h.frame(vec![]);
+    assert_eq!(h.app.query, ":da");
+    h.wait("tarih", |a| a.items.len() == 4 && a.items[1].name == "a-kucuk.txt" && a.items[3].name == "C-buyuk.txt");
+    // AltGr (Ctrl+Alt) ile değil
+    h.key(Key::Num1, alt_ctrl());
+    assert_eq!(h.app.query, ":da", "Ctrl+Alt+1 belirteç yazmaz");
+    // alt çubuk ipucu: belirteci döndürür
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "Ctrl+1/2/3") && t.iter().any(|s| s == "Sırala"), "{t:?}");
+    h.app.cycle_sort();
+    assert_eq!(h.app.query, ":na");
+    h.app.cycle_sort();
+    assert_eq!(h.app.query, ":si");
+    // kalıcı değil: belirteç silinince varsayılan sıra
+    h.app.query.clear();
+    h.frame(vec![]);
+    h.wait("varsayılan", |a| a.items.len() == 4 && a.items[0].name == "klasor" && a.sort_spec().is_none());
+    // arama sonuçlarında belirteç: "txt :si" → yalnızca "txt" aranır, boyuta göre
+    h.frame(vec![Event::Text("txt :si".into())]);
+    let mine = |a: &App| a.items.iter().filter(|i| i.path.contains("Sirali")).map(|i| i.name.clone()).collect::<Vec<_>>();
+    h.wait("sonuçlar", |a| a.query == "txt :si" && mine(a).len() == 3);
+    assert_eq!(mine(&h.app), ["C-buyuk.txt", "b-orta.txt", "a-kucuk.txt"]);
+    assert!(h.app.items.iter().filter(|i| !i.is_dir).collect::<Vec<_>>().windows(2).all(|w| w[0].size >= w[1].size));
+    // yeni arama (belirteç yok): sıralama yok
+    h.app.query = "txt".into();
+    h.frame(vec![]);
+    assert_eq!(h.app.sort_spec(), None);
+    // başka klasöre girmek metni (ve sıralamayı) temizler
+    h.app.query = ":si".into();
+    h.frame(vec![]);
+    let other = h.dir("Belgeler");
+    h.app.enter_browse(&other);
+    assert!(h.app.query.is_empty() && h.app.sort_spec().is_none());
+    // genel kısayol olarak Ctrl+1/2/3 ve Shift+F1 kabul edilmez
+    for hk in [crate::config::Hotkey { mods: crate::config::MOD_CONTROL, vk: 0x32 }, crate::config::Hotkey { mods: crate::config::MOD_SHIFT, vk: crate::config::VK_F1 }] {
+        h.app.start_record();
+        h.app.apply_hotkey(hk);
+        assert!(h.app.hk_pending.is_none(), "{} genel kısayol olamaz", hk.label());
+        assert!(h.app.toast.as_ref().is_some_and(|t| t.0.contains(&hk.label()) && t.0.contains("kullanılamaz")), "uyarı: {:?}", h.app.toast);
+    }
+});
+
+scenario!(slash_command, slash_command_child, |h| {
+    let dir = h.dir("Belgeler");
+    h.app.enter_browse(&dir);
+    h.wait("liste", |a| !a.items.is_empty());
+    h.frame(vec![Event::Text("/".into())]);
+    h.frame(vec![]);
+    assert!(h.app.is_cmd() && h.app.items.is_empty(), "'/' ile başlayan metin komuttur");
+    h.key(Key::Enter, Modifiers::NONE);
+    assert!(h.app.toast.as_ref().is_some_and(|t| t.0.starts_with("Çalıştırılacak komutu yazın")), "boş komut çalıştırılmaz: {:?}", h.app.toast);
+    h.frame(vec![Event::Text("ipconfig /all".into())]);
+    h.frame(vec![]);
+    assert_eq!(h.app.query, "/ipconfig /all");
+    assert_eq!(h.app.cmd_line(), Some("ipconfig /all"));
+    assert_eq!(h.app.cmd_dir().as_deref(), Some(dir.as_str()), "komut gözatılan klasörde çalışır");
+    assert!(h.app.items.is_empty() && h.app.content_query().is_none() && h.app.sort_spec().is_none(), "komutta arama/sıralama yok");
+    h.app.toast = None;
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "Komut"), "Komut çipi: {t:?}");
+    assert!(t.iter().any(|s| s == "ipconfig /all") && t.iter().any(|s| s.contains("terminalde çalıştır")), "komut kartı: {t:?}");
+    assert!(t.iter().any(|s| s == "Terminalde çalıştır"), "alt çubuk: {t:?}");
+    // Ctrl+1/2/3 komutta belirteç yazmaz
+    h.key(Key::Num2, ctrl());
+    assert_eq!(h.app.query, "/ipconfig /all");
+    // F1 döngüsünde Komut yok
+    assert!(!format!("{:?}", h.app.mode).contains("Cmd"));
+    // Esc: komut silinir, pencere gizlenmez, klasör listesi geri gelir
+    let out = h.key(Key::Escape, Modifiers::NONE);
+    assert!(!hid(&out), "Esc komuttan çıkar, pencereyi gizlemez");
+    assert!(h.app.query.is_empty() && !h.app.is_cmd());
+    h.wait("liste geri gelir", |a| !a.items.is_empty());
+    // "/" ortada: komut değil
+    h.frame(vec![Event::Text("a/b".into())]);
+    assert!(!h.app.is_cmd());
+});
+
+scenario!(shift_f1_cycles_back, shift_f1_cycles_back_child, |h| {
+    let shift = Modifiers { shift: true, ..Default::default() };
+    let is_name = |a: &App| a.mode == Mode::Search && a.ext.is_none() && a.content_query().is_none();
+    h.frame(vec![Event::Text("rapor".into())]);
+    assert!(is_name(&h.app));
+    h.key(Key::F1, shift);
+    assert!(h.app.content_query().is_some(), "İsim ← İçerik (sarar)");
+    assert_eq!(h.app.query, "rapor");
+    h.key(Key::F1, shift);
+    assert!(matches!(h.app.mode, Mode::ExtInput { .. }), "İçerik → Uzantı");
+    h.key(Key::F1, shift);
+    assert!(is_name(&h.app), "Uzantı → İsim");
+    assert_eq!(h.app.query, "rapor", "önceki sorgu geri gelir");
+    // uygulanmış uzantı süzgeci: geri → İsim
+    h.key(Key::F1, Modifiers::NONE);
+    h.frame(vec![Event::Text("pdf".into())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(h.app.ext.as_deref(), Some("pdf"));
+    h.key(Key::F1, shift);
+    assert!(is_name(&h.app), "Uzantı (süzgeç) → İsim");
+    // F1 hâlâ ileri (3 mod)
+    h.key(Key::F1, Modifiers::NONE);
+    assert!(matches!(h.app.mode, Mode::ExtInput { .. }), "F1: İsim → Uzantı");
+    h.key(Key::F1, Modifiers::NONE);
+    assert!(h.app.content_query().is_some(), "F1: Uzantı → İçerik");
+    h.key(Key::F1, Modifiers::NONE);
+    assert!(is_name(&h.app), "F1: İçerik → İsim");
+    // Shift+F1 menü açmaz; Shift+F10 bağlam menüsü hâlâ çalışır
+    h.key(Key::F1, shift);
+    assert!(h.app.menu.is_none() && h.app.content_query().is_some());
+    h.key(Key::F1, Modifiers::NONE);
+    assert!(is_name(&h.app));
+    h.app.query.clear();
+    h.app.research();
+    h.wait("liste", |a| !a.items.is_empty());
+    h.key(Key::F10, shift);
+    assert!(h.app.menu.as_ref().is_some_and(|m| m.context), "Shift+F10 bağlam menüsü");
+    h.key(Key::Escape, Modifiers::NONE);
+    assert!(h.app.menu.is_none() && is_name(&h.app));
+    // mod çipi: sağ tık geri, sol tık ileri; ipucu
+    let chip = pos2(60.0, SEARCH_H / 2.0);
+    h.frame(vec![Event::PointerMoved(chip)]);
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "F1 / tık: ileri · Shift+F1 / sağ tık: geri"), "mod çipi ipucu: {t:?}");
+    click_at(h, chip, egui::PointerButton::Secondary);
+    assert!(h.app.content_query().is_some() && h.app.menu.is_none(), "sağ tık: İsim → İçerik");
+    click_at(h, chip, egui::PointerButton::Secondary);
+    assert!(matches!(h.app.mode, Mode::ExtInput { .. }), "sağ tık: İçerik → Uzantı");
+    h.key(Key::Escape, Modifiers::NONE);
+    click_at(h, chip, egui::PointerButton::Primary);
+    assert!(matches!(h.app.mode, Mode::ExtInput { .. }), "sol tık: İsim → Uzantı");
+});
+
+#[test]
+fn command_splitting() {
+    let s = |x: &str| split_commands(x);
+    assert_eq!(
+        s(r"git clone https://github.com/u/p //cd p //cargo build --release //copy target\release\p.exe C:\bin"),
+        ["git clone https://github.com/u/p", "cd p", "cargo build --release", r"copy target\release\p.exe C:\bin"]
+    );
+    assert_eq!(s("ipconfig /all //dir"), ["ipconfig /all", "dir"]);
+    // boşluksuz "//" komutun parçası (URL'ler)
+    assert_eq!(s("curl http://a.b/c //echo file://x/y"), ["curl http://a.b/c", "echo file://x/y"]);
+    assert_eq!(s("ipconfig//all"), ["ipconfig//all"]);
+    // tek "/" anahtarlar, -/-- bayrakları dokunulmaz
+    assert_eq!(s("dir /s /b"), ["dir /s /b"]);
+    assert_eq!(s("cargo build --release -j 4 //git status -s"), ["cargo build --release -j 4", "git status -s"]);
+    // sondaki / baştaki "//", çok boşluk, boş komutlar
+    assert_eq!(s("ipconfig //"), ["ipconfig"]);
+    assert_eq!(s("ipconfig   //   //  dir   "), ["ipconfig", "dir"]);
+    assert_eq!(s("//dir"), ["dir"]);
+    assert_eq!(s("a\t//b"), ["a", "b"]);
+    assert_eq!(s(""), Vec::<String>::new());
+    assert_eq!(s("  //  "), Vec::<String>::new());
+    // Türkçe karakterler
+    assert_eq!(s("echo çalış //echo şimdi"), ["echo çalış", "echo şimdi"]);
+}
+
+scenario!(slash_command_chain_card, slash_command_chain_card_child, |h| {
+    h.frame(vec![Event::Text(r"/git clone https://github.com/u/p //cd p //cargo build --release //copy target\release\p.exe C:\bin".into())]);
+    h.frame(vec![]);
+    assert!(h.app.is_cmd());
+    assert_eq!(h.app.cmd_list().len(), 4);
+    assert!(h.app.visible_rows() > 2, "kart çok komutta büyür");
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "4 komut · sırayla çalışır, biri başarısız olursa durur"), "{t:?}");
+    for (n, c) in [("1.", "git clone https://github.com/u/p"), ("2.", "cd p"), ("3.", "cargo build --release"), ("4.", r"copy target\release\p.exe C:\bin")] {
+        assert!(t.iter().any(|s| s == n) && t.iter().any(|s| s == c), "numaralı satır {n} {c}: {t:?}");
+    }
+    // tek komut + sondaki "//": eski kart
+    h.app.query = "/ipconfig /all //".into();
+    h.frame(vec![]);
+    assert_eq!(h.app.cmd_list(), ["ipconfig /all"]);
+    assert_eq!(h.app.visible_rows(), 2);
+    let t = shape_texts(&h.frame(vec![]));
+    assert!(t.iter().any(|s| s == "ipconfig /all"), "{t:?}");
+});

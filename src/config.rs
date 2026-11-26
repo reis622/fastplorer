@@ -7,6 +7,7 @@ pub const MOD_ALT: u32 = 0x1;
 pub const MOD_CONTROL: u32 = 0x2;
 pub const MOD_SHIFT: u32 = 0x4;
 pub const MOD_WIN: u32 = 0x8;
+pub const VK_F1: u32 = 0x70;
 pub const VK_F9: u32 = 0x78;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -126,6 +127,13 @@ pub fn valid_hotkey(h: Hotkey) -> bool {
     h.vk != 0 && (plain_ok || h.mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) != 0)
 }
 
+/// Uygulama içinde kullanılan kısayolla çakışıyor mu? Ctrl+1/2/3 listeyi sıralar, Shift+F1 arama
+/// modunu geri alır; genel kısayol yapılırsa sistem geneli yakalanır ve uygulamada çalışmaz.
+pub fn reserved_hotkey(h: Hotkey) -> bool {
+    let m = h.mods & (MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN);
+    (m == MOD_CONTROL && matches!(h.vk, 0x31..=0x33)) || (m == MOD_SHIFT && h.vk == VK_F1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +150,17 @@ mod tests {
         assert!(!valid_hotkey(Hotkey { mods: 0, vk: 0x41 }));
         assert!(!valid_hotkey(Hotkey { mods: MOD_SHIFT, vk: 0x41 }));
         assert!(valid_hotkey(Hotkey { mods: MOD_ALT, vk: 0x20 }));
+        // Ctrl+1/2/3 uygulamada sıralama için ayrılmış
+        for vk in 0x31..=0x33 {
+            assert!(reserved_hotkey(Hotkey { mods: MOD_CONTROL, vk }));
+        }
+        assert!(!reserved_hotkey(Hotkey { mods: MOD_CONTROL, vk: 0x34 }));
+        assert!(!reserved_hotkey(Hotkey { mods: MOD_CONTROL | MOD_ALT, vk: 0x31 }));
+        assert!(!reserved_hotkey(Hotkey { mods: MOD_ALT, vk: 0x31 }));
+        assert!(!reserved_hotkey(Hotkey { mods: 0, vk: VK_F9 }));
+        assert!(reserved_hotkey(Hotkey { mods: MOD_SHIFT, vk: VK_F1 }));
+        assert!(!reserved_hotkey(Hotkey { mods: 0, vk: VK_F1 }));
+        assert!(!reserved_hotkey(Hotkey { mods: MOD_SHIFT | MOD_CONTROL, vk: VK_F1 }));
     }
     #[test]
     fn old_config_gets_terminal_default() {

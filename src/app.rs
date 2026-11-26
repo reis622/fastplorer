@@ -36,8 +36,10 @@ pub const SETTINGS_ROWS: usize = 4;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
     Open,
-    /// Arama modu: İsim → Uzantı → İçerik → İsim (F1 / mod çipi).
+    /// Arama modu: İsim → Uzantı → İçerik → Komut → İsim (F1 / mod çipi).
     CycleMode,
+    /// Arama modu geri: İsim → Komut → İçerik → Uzantı → İsim (Shift+F1 / mod çipine sağ tık).
+    CycleModeBack,
     /// Geri Dönüşüm Kutusu: seçili öğeyi özgün yerine geri yükle.
     Restore,
     /// Geri Dönüşüm Kutusu: öğenin özgün klasörünü aç.
@@ -151,10 +153,92 @@ pub enum EscAction {
     ClearMarks,
     LeaveMode,
     LeaveExtInput,
+    CmdOff,
     ContentOff,
     ExtOff,
     LeaveBrowse,
     Hide,
+}
+
+/// Sıralama alanları (Ctrl+1/2/3).
+pub const SORT_NAME: u8 = 0;
+pub const SORT_SIZE: u8 = 1;
+pub const SORT_DATE: u8 = 2;
+
+/// Arama kutusunun sonundaki sıralama belirteci: ":na" İsim (A→Z), ":si" Boyut (büyükten),
+/// ":da" Tarih (yeniden); sonda "-" yönü çevirir (":si-"). Belirteç aramadan çıkarılır.
+/// Döner: (belirteçsiz sorgu, Some((alan, azalan))).
+pub fn parse_sort(q: &str) -> (&str, Option<(u8, bool)>) {
+    let t = q.trim_end();
+    let start = t.rfind(char::is_whitespace).map(|i| i + t[i..].chars().next().map_or(1, char::len_utf8)).unwrap_or(0);
+    let tok = &t[start..];
+    let (body, rev) = match tok.strip_suffix('-') {
+        Some(b) => (b, true),
+        None => (tok, false),
+    };
+    let k = match body.to_ascii_lowercase().as_str() {
+        ":na" => SORT_NAME,
+        ":si" => SORT_SIZE,
+        ":da" => SORT_DATE,
+        _ => return (q, None),
+    };
+    let default_desc = k != SORT_NAME;
+    (t[..start].trim_end(), Some((k, default_desc != rev)))
+}
+
+/// "/" komut metnini komutlara böl: boşluktan sonra (ya da en başta) gelen "//" yeni komut başlatır.
+/// Boşluksuz "//" (https://, file://) ve tek "/" (ipconfig /all) komutun parçasıdır. Komutlar
+/// kırpılır, boş olanlar atılır (sondaki "//" gibi).
+pub fn split_commands(s: &str) -> Vec<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let (mut start, mut i) = (0usize, 0usize);
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'/' && (i == 0 || b[i - 1].is_ascii_whitespace()) {
+            out.push(&s[start..i]);
+            i += 2;
+            start = i;
+            continue;
+        }
+        i += 1;
+    }
+    out.push(&s[start..]);
+    out.into_iter().map(str::trim).filter(|c| !c.is_empty()).map(String::from).collect()
+}
+
+/// Komut kartının yüksekliği (komut sayısına göre).
+pub fn cmd_card_height(n: usize) -> f32 {
+    if n <= 1 { 92.0 } else { 100.0 + n as f32 * 20.0 }
+}
+
+/// Ctrl+1/2/3: sorguya belirteç ekle ya da değiştir; aynı alan yeniden seçilince "-" eklenir/kalkar.
+pub fn with_sort_token(q: &str, k: u8) -> String {
+    let (base, cur) = parse_sort(q);
+    let base = base.trim_end();
+    let name = match k {
+        SORT_NAME => ":na",
+        SORT_SIZE => ":si",
+        _ => ":da",
+    };
+    let rev = match cur {
+        Some((ck, desc)) if ck == k => desc == (k != SORT_NAME),
+        _ => false,
+    };
+    let tok = if rev { format!("{name}-") } else { name.to_string() };
+    if base.is_empty() { tok } else { format!("{base} {tok}") }
+}
+
+/// İki öğeyi seçili alana göre karşılaştır. `dirs_first`: klasörler her zaman dosyalardan önce.
+pub fn sort_cmp(a: &Item, b: &Item, k: u8, desc: bool, dirs_first: bool) -> std::cmp::Ordering {
+    if dirs_first && a.is_dir != b.is_dir {
+        return b.is_dir.cmp(&a.is_dir);
+    }
+    let o = match k {
+        SORT_NAME => util::fold(&a.name).cmp(&util::fold(&b.name)),
+        SORT_SIZE => a.size.cmp(&b.size),
+        _ => a.mtime.cmp(&b.mtime),
+    };
+    if desc { o.reverse() } else { o }
 }
 
 /// Esc kararı için durum özeti.
@@ -171,6 +255,7 @@ pub struct EscState {
     /// Son hedefler / Bin / Ayarlar.
     pub sub_mode: bool,
     pub ext_input: bool,
+    pub cmd: bool,
     pub content: bool,
     pub ext: bool,
     pub browse: bool,
@@ -198,6 +283,8 @@ pub fn esc_action(s: EscState) -> EscAction {
         EscAction::ClearMarks
     } else if s.sub_mode {
         EscAction::LeaveMode
+    } else if s.cmd {
+        EscAction::CmdOff
     } else if s.content {
         EscAction::ContentOff
     } else if s.ext {
@@ -356,6 +443,13 @@ pub struct App {
     pub ext: Option<String>,
     /// İçerik araması açık (">" önekiyle de olur).
     pub content: bool,
+    /// Klasör boyutları (arka planda, ":si" sıralamasında).
+    pub dirs: crate::dirsize::DirSizes,
+    /// Son istenen klasör boyutu listesi ve görülen hesap sayacı.
+    size_req: Vec<String>,
+    size_seen: u64,
+    /// Arama kutusunda imleç sona alınsın (Ctrl+1/2/3 belirteci yazdı).
+    pub query_cursor_end: bool,
     /// Yol şeridi klavye modu: vurgulanan bölüm (0 = "Tümü").
     pub crumb_sel: Option<usize>,
     /// Son gösterilme zamanı (odak kaybıyla gizleme için kısa bekleme).
@@ -524,6 +618,10 @@ impl App {
             hide_epoch_seen: platform::hide_epoch(),
             ext: None,
             content: false,
+            dirs: crate::dirsize::DirSizes::new(),
+            size_req: Vec::new(),
+            size_seen: 0,
+            query_cursor_end: false,
             crumb_sel: None,
             shown_at: Instant::now(),
             got_focus: false,
@@ -593,15 +691,52 @@ impl App {
 
     /// İçerik araması etkin mi ve aranan metin.
     pub fn content_query(&self) -> Option<String> {
-        if let Some(rest) = self.query.strip_prefix('>') {
+        if self.is_cmd() {
+            return None;
+        }
+        let q = self.search_text();
+        if let Some(rest) = q.strip_prefix('>') {
             return Some(rest.trim().to_string());
         }
-        self.content.then(|| self.query.trim().to_string())
+        self.content.then(|| q.trim().to_string())
+    }
+
+    /// "/" ile başlayan arama metni komuttur: "/ipconfig" → "ipconfig".
+    pub fn cmd_line(&self) -> Option<&str> {
+        if self.mode != Mode::Search {
+            return None;
+        }
+        self.query.trim_start().strip_prefix('/').map(str::trim)
+    }
+
+    /// "/" metnindeki komutlar ("//" ile ayrılmış).
+    pub fn cmd_list(&self) -> Vec<String> {
+        self.cmd_line().map(split_commands).unwrap_or_default()
+    }
+
+    pub fn is_cmd(&self) -> bool {
+        self.cmd_line().is_some()
+    }
+
+    /// Arama kutusundaki sıralama belirteci (yalnızca arama modunda).
+    pub fn sort_spec(&self) -> Option<(u8, bool)> {
+        if self.mode != Mode::Search || self.is_cmd() {
+            return None;
+        }
+        parse_sort(&self.query).1
+    }
+
+    /// Aranacak metin: sıralama belirteci çıkarılmış sorgu.
+    pub fn search_text(&self) -> String {
+        if self.mode != Mode::Search || self.is_cmd() {
+            return self.query.clone();
+        }
+        parse_sort(&self.query).0.to_string()
     }
 
     /// Satır vurgusu için sorgu (">" öneki olmadan).
     pub fn match_query(&self) -> String {
-        self.content_query().unwrap_or_else(|| if matches!(self.mode, Mode::ExtInput { .. }) { String::new() } else { self.query.clone() })
+        self.content_query().unwrap_or_else(|| if matches!(self.mode, Mode::ExtInput { .. }) { String::new() } else { self.search_text() })
     }
 
     pub fn visible_rows(&self) -> usize {
@@ -610,6 +745,11 @@ impl App {
         }
         if matches!(self.mode, Mode::Note { .. }) {
             return 5;
+        }
+        if self.is_cmd() {
+            // Komut kartı için yer (birden çok komutta satır sayısına göre)
+            let n = self.cmd_list().len();
+            return if n <= 1 { 2 } else { (((cmd_card_height(n) + 12.0) / ROW_H).ceil() as usize).min(MAX_ROWS) };
         }
         let mut n = self.items.len().clamp(1, MAX_ROWS);
         if self.preview_open || self.confirm.is_some() {
@@ -639,6 +779,16 @@ impl App {
             Mode::Settings | Mode::ExtInput { .. } | Mode::Note { .. } => return,
             Mode::Search => {}
         }
+        if self.is_cmd() {
+            // "/komut": arama yapılmaz; yazılan komut Enter ile terminalde çalışır
+            self.gen_ += 1;
+            self.latest.store(self.gen_, Ordering::SeqCst);
+            self.items.clear();
+            self.sel = 0;
+            self.scroll = 0;
+            self.waiting = false;
+            return;
+        }
         self.gen_ += 1;
         self.latest.store(self.gen_, Ordering::SeqCst);
         let ext = self.ext.clone();
@@ -652,8 +802,9 @@ impl App {
             }
             Some(q) => (Kind::Content, q, Vec::new()),
             None => {
-                let r = if self.query.trim().is_empty() && self.browse.is_none() { self.recent_list() } else { Vec::new() };
-                (Kind::Name, self.query.clone(), r)
+                let q = self.search_text();
+                let r = if q.trim().is_empty() && self.browse.is_none() { self.recent_list() } else { Vec::new() };
+                (Kind::Name, q, r)
             }
         };
         let _ = self.stx.send(Req { generation: self.gen_, query, tab: 0, kind, recent, scope: self.browse.clone(), ext });
@@ -703,13 +854,14 @@ impl App {
     /// Ana liste (boş arama, son kullanılanlar) en üstte mi? Öyleyse sessiz yenilemede en üstte
     /// kalır; sıralama değişince seçili öğeyi takip edip listenin sonuna zıplamaz.
     fn home_top(&self) -> bool {
-        self.mode == Mode::Search && self.browse.is_none() && self.query.trim().is_empty() && self.sel == 0 && self.scroll == 0 && self.edit.is_none()
+        self.mode == Mode::Search && self.browse.is_none() && self.search_text().trim().is_empty() && self.sel == 0 && self.scroll == 0 && self.edit.is_none()
     }
 
     fn set_items(&mut self, items: Vec<Item>, new_query: bool) {
         let home_top = self.home_top();
         let keep = self.reselect.take().or_else(|| if new_query || home_top { None } else { self.selected().map(|i| i.path.clone()) });
         self.items = items;
+        self.apply_sort();
         if !self.marked.is_empty() {
             let have: HashSet<&str> = self.items.iter().map(|i| i.path.as_str()).collect();
             self.marked.retain(|p| have.contains(p.as_str()));
@@ -887,7 +1039,7 @@ impl App {
         let v = self.idx.version.load(Ordering::SeqCst);
         if v != self.idx_version {
             self.idx_version = v;
-            if self.mode == Mode::Search && !(self.browse.is_some() && self.query.trim().is_empty()) {
+            if self.mode == Mode::Search && !(self.browse.is_some() && self.search_text().trim().is_empty()) {
                 self.research_keep();
             }
         }
@@ -1117,6 +1269,7 @@ impl App {
                 }
             }
             Act::CycleMode => self.cycle_mode(),
+            Act::CycleModeBack => self.cycle_mode_back(),
             Act::ClearClip => self.clear_clip(),
             Act::Multi => {
                 if self.mode == Mode::Search {
@@ -1329,6 +1482,11 @@ impl App {
         if !config::valid_hotkey(h) {
             platform::suspend_hotkey(false);
             self.toast(tf!("{} kullanılamaz: Ctrl/Alt ile birlikte ya da F tuşu seçin", "{} cannot be used: combine it with Ctrl/Alt or pick an F key", h.label()), false);
+            return;
+        }
+        if config::reserved_hotkey(h) {
+            platform::suspend_hotkey(false);
+            self.toast(tf!("{} kullanılamaz: Fastplorer içinde kısayol olarak kullanılıyor", "{} cannot be used: Fastplorer already uses it as a shortcut", h.label()), false);
             return;
         }
         self.hk_pending = Some(h);
@@ -2009,7 +2167,8 @@ impl App {
         if self.mode != Mode::Search || self.content_query().is_some() || self.ext.is_some() {
             return;
         }
-        let q = self.query.trim();
+        let q = self.search_text();
+        let q = q.trim();
         let show = match &self.browse {
             None => !q.is_empty() && crate::recycle::query_matches(q),
             Some(b) => self.is_desktop(b) && (q.is_empty() || crate::recycle::query_matches(q)),
@@ -2077,6 +2236,119 @@ impl App {
         }
     }
 
+    /// Listeyi arama kutusundaki belirtece göre diz (yalnızca arama modunda; belirteç yoksa arama
+    /// sırası, yani v0.9 ilgililik sıralaması korunur). Geri Dönüşüm Kutusu girişi ve yeni öğe satırı
+    /// başta kalır. ":si" dışında gözatılan klasörde klasörler dosyalardan önce gelir; ":si" ile
+    /// klasörler (arka planda hesaplanan boyutlarıyla) ve dosyalar birlikte sıralanır.
+    pub fn apply_sort(&mut self) {
+        let Some((k, desc)) = self.sort_spec() else {
+            if !self.size_req.is_empty() {
+                self.dirs.cancel();
+                self.size_req.clear();
+            }
+            return;
+        };
+        let pinned = self.items.iter().take_while(|i| i.path.is_empty() || i.path == crate::recycle::VIRTUAL_PATH).count();
+        if k == SORT_SIZE {
+            let dirs: Vec<String> = self.items[pinned..].iter().filter(|i| i.is_dir).map(|i| i.path.clone()).collect();
+            for it in self.items[pinned..].iter_mut().filter(|i| i.is_dir) {
+                it.size = self.dirs.get(&it.path).unwrap_or(0);
+            }
+            if dirs != self.size_req {
+                self.dirs.request(&dirs);
+                self.size_req = dirs;
+            }
+        } else if !self.size_req.is_empty() {
+            self.dirs.cancel();
+            self.size_req.clear();
+        }
+        let dirs_first = self.browse.is_some() && k != SORT_SIZE;
+        self.items[pinned..].sort_by(|a, b| sort_cmp(a, b, k, desc, dirs_first));
+    }
+
+    /// Arka planda yeni klasör boyutları geldiyse (":si") listeyi yeniden diz; seçili öğe korunur.
+    pub fn poll_dir_sizes(&mut self) {
+        let v = self.dirs.version();
+        if v == self.size_seen {
+            return;
+        }
+        self.size_seen = v;
+        if self.sort_spec().is_some_and(|(k, _)| k == SORT_SIZE) && self.edit.is_none() {
+            let keep = self.selected().map(|i| i.path.clone());
+            self.apply_sort();
+            if let Some(p) = keep
+                && let Some(i) = self.items.iter().position(|i| i.path == p)
+            {
+                self.sel = i;
+            }
+            self.fix_scroll();
+        }
+    }
+
+    /// Ctrl+1/2/3: arama kutusuna sıralama belirtecini yaz (":na" / ":si" / ":da"; aynı tuş "-" ekler/kaldırır).
+    pub fn set_sort(&mut self, k: u8) {
+        if self.mode != Mode::Search || self.is_cmd() {
+            return;
+        }
+        self.query = with_sort_token(&self.query, k);
+        self.query_cursor_end = true;
+        self.focus_query = true;
+    }
+
+    /// Alt çubuktaki "Ctrl+1/2/3 Sırala": belirteci sırayla değiştir (yok → :na → :si → :da → :na).
+    pub fn cycle_sort(&mut self) {
+        let k = match self.sort_spec() {
+            Some((SORT_NAME, _)) => SORT_SIZE,
+            Some((SORT_SIZE, _)) => SORT_DATE,
+            _ => SORT_NAME,
+        };
+        if self.mode != Mode::Search || self.is_cmd() {
+            return;
+        }
+        let base = parse_sort(&self.query).0.to_string();
+        self.query = with_sort_token(&base, k);
+        self.query_cursor_end = true;
+        self.focus_query = true;
+    }
+
+    /// Komutun çalışacağı klasör: gözatılan klasör; değilse kullanıcı klasörü.
+    pub fn cmd_dir(&self) -> Option<String> {
+        self.browse.clone().or_else(|| std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|h| h.to_string_lossy().to_string()))
+    }
+
+    /// "/komut" + Enter: komutu Ayarlar'da seçili terminalde ayrı pencerede çalıştır (pencere açık kalır).
+    pub fn run_command(&mut self) {
+        let cmds = self.cmd_list();
+        if cmds.is_empty() {
+            self.toast(t!("Çalıştırılacak komutu yazın (ör. /ipconfig)", "Type a command to run (e.g. /ipconfig)"), false);
+            return;
+        }
+        let Some(dir) = self.cmd_dir().filter(|d| std::path::Path::new(d).is_dir()) else {
+            self.toast(t!("Klasör bulunamadı", "Folder not found"), false);
+            return;
+        };
+        let env = terminal::Env::current();
+        let t = self.term_choice();
+        match terminal::build_run(t, &self.config.terminal_custom, &dir, &cmds, &env).and_then(|p| terminal::launch(&p.launch).map(|_| (p.copy, p.text))) {
+            Ok((copy, line)) => {
+                self.state.add_dest(&dir);
+                self.state.save();
+                if copy {
+                    let copied = ops::set_clipboard_text(&line);
+                    let name = self.term_label();
+                    if copied {
+                        self.toast(tf!("{name} açıldı · komut panoya kopyalandı: yapıştırıp Enter'a basın", "{name} opened · the command was copied: paste it and press Enter"), true);
+                    } else {
+                        self.toast(tf!("{name} açıldı · komut panoya kopyalanamadı", "{name} opened · could not copy the command"), false);
+                    }
+                } else {
+                    self.toast(tf!("Çalıştırıldı: {}", "Started: {}", line), true);
+                }
+            }
+            Err(e) => self.toast(tf!("Komut çalıştırılamadı: {e}", "Could not run the command: {e}"), false),
+        }
+    }
+
     /// Arama modu: İsim → Uzantı → İçerik → İsim (F1 ya da arama kutusunun solundaki çip).
     pub fn cycle_mode(&mut self) {
         match self.mode.clone() {
@@ -2103,6 +2375,43 @@ impl App {
                 self.mode = Mode::ExtInput { prev };
                 self.focus_query = true;
                 return;
+            }
+            _ => return,
+        }
+        self.focus_query = true;
+        self.items.clear();
+        self.research();
+    }
+
+    /// Arama modu geri (Shift+F1 / mod çipine sağ tık): İsim → İçerik → Uzantı → İsim.
+    pub fn cycle_mode_back(&mut self) {
+        match self.mode.clone() {
+            Mode::ExtInput { prev } => {
+                // Uzantı yazılırken → İsim (önceki sorgu geri gelir)
+                self.mode = Mode::Search;
+                self.query = prev;
+                self.ext = None;
+            }
+            Mode::Search if self.content_query().is_some() => {
+                // İçerik → Uzantı (uzantı yazma satırı)
+                if self.query.starts_with('>') {
+                    self.query = self.query[1..].trim_start().to_string();
+                }
+                self.content = false;
+                self.ext = None;
+                let prev = std::mem::take(&mut self.query);
+                self.mode = Mode::ExtInput { prev };
+                self.focus_query = true;
+                return;
+            }
+            Mode::Search if self.ext.is_some() => {
+                // Uzantı → İsim
+                self.ext = None;
+            }
+            Mode::Search => {
+                // İsim → İçerik
+                self.ext = None;
+                self.content = true;
             }
             _ => return,
         }
@@ -2432,13 +2741,20 @@ impl App {
 
         // Uzantı süzgeci yazılıyor
         if matches!(self.mode, Mode::ExtInput { .. }) {
-            let (mut ok, mut esc, mut f1) = (false, false, false);
+            let (mut ok, mut esc, mut f1, mut f1_back) = (false, false, false, false);
             ctx.input_mut(|i| {
                 ok = i.consume_key(Modifiers::NONE, Key::Enter);
                 esc = i.consume_key(Modifiers::NONE, Key::Escape);
                 i.consume_key(Modifiers::NONE, Key::Tab);
+                // Shift+F1 önce: consume_key(NONE) Shift'i yok sayar
+                f1_back = i.consume_key(Modifiers::SHIFT, Key::F1);
                 f1 = i.consume_key(Modifiers::NONE, Key::F1);
             });
+            if f1_back {
+                // Uzantı ← İsim
+                self.cycle_mode_back();
+                return;
+            }
             if f1 {
                 // Uzantı → İçerik
                 self.cycle_mode();
@@ -2531,6 +2847,7 @@ impl App {
         let mut ctx_menu = false;
         let mut sel_all = false;
         let mut space_toggle = false;
+        let mut sort_key: Option<u8> = None;
         let multi = self.multi && self.mode == Mode::Search;
         ctx.input_mut(|i| {
             // önce Shift'li: consume_key(NONE) Shift'i yok sayar
@@ -2553,6 +2870,14 @@ impl App {
             }
             if i.consume_key(Modifiers::COMMAND, Key::T) {
                 acts.push(Act::Terminal);
+            }
+            // Ctrl+1/2/3: sırala. Alt/AltGr basılıyken değil (Türkçe Q'da AltGr+1/2/3 = > £ #).
+            if !i.modifiers.alt {
+                for (key, n) in [(Key::Num1, SORT_NAME), (Key::Num2, SORT_SIZE), (Key::Num3, SORT_DATE)] {
+                    if i.consume_key(Modifiers::COMMAND, key) {
+                        sort_key = Some(n);
+                    }
+                }
             }
             if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
                 mv += 1;
@@ -2604,7 +2929,10 @@ impl App {
             if i.consume_key(Modifiers::NONE, Key::F2) {
                 acts.push(Act::Rename);
             }
-            if i.consume_key(Modifiers::NONE, Key::F1) {
+            // Shift+F1 önce: consume_key(NONE) Shift'i yok sayar
+            if i.consume_key(Modifiers::SHIFT, Key::F1) {
+                acts.push(Act::CycleModeBack);
+            } else if i.consume_key(Modifiers::NONE, Key::F1) {
                 acts.push(Act::CycleMode);
             }
             if i.consume_key(Modifiers::COMMAND, Key::S) {
@@ -2648,6 +2976,14 @@ impl App {
             Some(true) => self.step_sel(self.items.len() as isize - 1 - self.sel as isize, false),
             None => {}
         }
+        if let Some(k) = sort_key {
+            self.set_sort(k);
+        }
+        if self.is_cmd() && enter.is_some() {
+            // "/komut": Enter (ve Alt+Enter) komutu çalıştırır
+            enter = None;
+            self.run_command();
+        }
         if let Some(alt) = enter {
             if multi && !alt && self.marked.len() > 1 {
                 self.open_all(ctx);
@@ -2669,7 +3005,7 @@ impl App {
                     self.open_menu(false, p);
                 }
                 Act::Paste if self.mode != Mode::Search => {}
-                Act::Multi | Act::Note | Act::Terminal | Act::CycleMode | Act::SelectAll if self.mode != Mode::Search => {}
+                Act::Multi | Act::Note | Act::Terminal | Act::CycleMode | Act::CycleModeBack | Act::SelectAll if self.mode != Mode::Search => {}
                 Act::Paste => {
                     let has_files = self.clip.is_some() || ops::get_clipboard_files().is_some();
                     if has_files {
@@ -2826,6 +3162,7 @@ impl App {
             marked: !self.marked.is_empty(),
             sub_mode: matches!(self.mode, Mode::Dests | Mode::Bin | Mode::Settings | Mode::Trash),
             ext_input: matches!(self.mode, Mode::ExtInput { .. }),
+            cmd: self.is_cmd(),
             content: self.mode == Mode::Search && self.content_query().is_some(),
             ext: self.ext.is_some(),
             browse: self.browse.is_some(),
@@ -2856,6 +3193,13 @@ impl App {
                     self.research();
                 }
             }
+            EscAction::CmdOff => {
+                // "/komut" yazısı silinir
+                self.query.clear();
+                self.focus_query = true;
+                self.items.clear();
+                self.research();
+            }
             EscAction::ContentOff => {
                 if self.query.starts_with('>') {
                     self.query = self.query[1..].trim_start().to_string();
@@ -2883,6 +3227,8 @@ impl App {
     }
 
     pub fn frame_start(&mut self, ctx: &Context) {
+        self.dirs.set_ctx(ctx);
+        self.poll_dir_sizes();
         platform::heartbeat();
         // ana pencere gizlendiyse (F9, odak kaybı, tepsi…) açık menü kapanır
         let ep = platform::hide_epoch();

@@ -450,9 +450,10 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         ext_chip_x = Some(xr.expand(2.0));
         chip_x = r.left() - 8.0;
     }
-    // solda arama modu çipi (F1 ya da tıklama: İsim → Uzantı → İçerik)
+    // solda arama modu çipi (F1 ya da tıklama: İsim → Uzantı → İçerik → Komut; Shift+F1 ya da sağ tık: geri)
     let mut te_left = panel.left() + 50.0;
     let mode_lab = match app.mode {
+        Mode::Search if app.is_cmd() => Some((3, t!("Komut", "Command"))),
         Mode::ExtInput { .. } => Some((1, t!("Uzantı", "Extension"))),
         Mode::Search if app.content_query().is_some() => Some((2, t!("İçerik", "Content"))),
         Mode::Search if app.ext.is_some() => Some((1, t!("Uzantı", "Extension"))),
@@ -461,6 +462,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     };
     if let Some((kind, lab)) = mode_lab {
         let (bg, bd, fgc) = match kind {
+            3 => (Color32::from_rgb(0x36, 0x2c, 0x1c), Color32::from_rgb(0xe8, 0xb0, 0x60).gamma_multiply(0.6), Color32::from_rgb(0xf3, 0xd2, 0x9a)),
             2 => (Color32::from_rgb(0x2a, 0x2f, 0x24), t::OK.gamma_multiply(0.6), Color32::from_rgb(0xc8, 0xe6, 0xb0)),
             1 => (t::accent_dim(), t::ACCENT.gamma_multiply(0.6), Color32::from_rgb(0xcf, 0xe4, 0xf7)),
             _ => (Color32::from_rgb(0x2a, 0x2d, 0x34), Color32::from_rgb(0x3a, 0x3e, 0x46), t::KEY),
@@ -475,6 +477,18 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         painter.text(pos2(r.right() - 9.0, cy + 0.5), Align2::RIGHT_CENTER, "F1", reg(9.5), fgc.gamma_multiply(0.55));
         te_left = r.right() + 10.0;
         mode_chip = Some(r);
+        if hov {
+            // ipucu: ileri/geri (en üst katmanda)
+            let tp = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("fp-mode-tip")));
+            let l1 = t!("F1 / tık: ileri · Shift+F1 / sağ tık: geri", "F1 / click: next · Shift+F1 / right-click: back");
+            let l2 = t!("İsim · Uzantı · İçerik  ·  /komut yazınca: terminalde çalıştır", "Name · Extension · Content  ·  type /command: run in terminal");
+            let w = text_w(&tp, l1, reg(11.5)).max(text_w(&tp, l2, reg(11.0))) + 24.0;
+            let tr = Rect::from_min_size(pos2(r.left(), r.bottom() + 8.0), vec2(w, 46.0));
+            tp.rect_filled(tr.translate(vec2(0.0, 3.0)), CornerRadius::same(8), Color32::from_black_alpha(90));
+            tp.rect(tr, CornerRadius::same(8), Color32::from_rgb(0x25, 0x28, 0x30), Stroke::new(1.0, Color32::from_rgb(0x3a, 0x3e, 0x46)), StrokeKind::Inside);
+            tp.text(pos2(tr.left() + 12.0, tr.top() + 15.0), Align2::LEFT_CENTER, l1, reg(11.5), t::FG);
+            tp.text(pos2(tr.left() + 12.0, tr.top() + 32.0), Align2::LEFT_CENTER, l2, reg(11.0), t::TEXT3);
+        }
     }
     let te_rect = Rect::from_min_max(pos2(te_left, panel.top() + 14.0), pos2(chip_x - 6.0, panel.top() + 42.0));
     let hint: String = match &app.mode {
@@ -510,6 +524,15 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
     if app.edit.is_none() && app.mode != Mode::Settings && !note_mode && win_focused && (app.focus_query || !resp.has_focus()) {
         resp.request_focus();
         app.focus_query = false;
+    }
+    if app.query_cursor_end {
+        // Ctrl+1/2/3 belirteci yazdı: imleç sona
+        app.query_cursor_end = false;
+        if let Some(mut st) = egui::TextEdit::load_state(&ctx, resp.id) {
+            let n = app.query.chars().count();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(n))));
+            st.store(&ctx, resp.id);
+        }
     }
     app.after_query_edit();
     painter.line_segment([pos2(panel.left(), panel.top() + SEARCH_H + 0.5), pos2(panel.right(), panel.top() + SEARCH_H + 0.5)], Stroke::new(1.0, t::line()));
@@ -677,7 +700,51 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
             (_, true, _) => t!("Bu klasör boş", "This folder is empty"),
             _ => "",
         };
-        if !app.busy_waiting() && app.mode != Mode::Settings && !note_mode {
+        if app.cmd_line().is_some() {
+            // "/komut" kartı
+            let one = app.cmd_list().into_iter().next().unwrap_or_default();
+            let q = one.as_str();
+            let dir = app.cmd_dir().unwrap_or_else(|| t!("kullanıcı klasörü", "user folder").into());
+            let r = row_rect(&l, 0);
+            let cmds = app.cmd_list();
+            let enter_hint = if matches!(app.term_choice(), crate::terminal::Term::Hyper | crate::terminal::Term::Custom) { t!("terminali bu klasörde aç · komut panoya kopyalanır", "open the terminal here · the command is copied") } else { t!("terminalde çalıştır (ayrı pencere, açık kalır)", "run in terminal (separate window, stays open)") };
+            if cmds.len() > 1 {
+                // birden çok komut: numaralı satırlar
+                let card = Rect::from_min_size(pos2(r.left() + 12.0, r.top() + 6.0), vec2(r.width() - 24.0, cmd_card_height(cmds.len())));
+                let painter = painter.with_clip_rect(card.intersect(painter.clip_rect()).intersect(l.list_rect));
+                painter.rect(card, CornerRadius::same(10), Color32::from_rgb(0x1b, 0x1e, 0x24), Stroke::new(1.0, Color32::from_rgb(0x34, 0x38, 0x40)), StrokeKind::Inside);
+                painter.rect_filled(Rect::from_min_max(pos2(card.left(), card.top() + 12.0), pos2(card.left() + 3.0, card.bottom() - 12.0)), CornerRadius::same(2), Color32::from_rgb(0xe8, 0xb0, 0x60));
+                paint_terminal(&painter, pos2(card.left() + 28.0, card.top() + 26.0), Color32::from_rgb(0xf3, 0xd2, 0x9a));
+                let x = card.left() + 48.0;
+                let pr = painter.text(pos2(x, card.top() + 26.0), Align2::LEFT_CENTER, "›", sb(16.0), Color32::from_rgb(0xe8, 0xb0, 0x60));
+                painter.text(pos2(pr.right() + 8.0, card.top() + 26.0), Align2::LEFT_CENTER, tf!("{} komut · sırayla çalışır, biri başarısız olursa durur", "{} commands · run in order, stop if one fails", cmds.len()), reg(12.0), t::TEXT2);
+                let mut y = card.top() + 50.0;
+                for (i, c) in cmds.iter().enumerate() {
+                    let nr = painter.text(pos2(x + 18.0, y), Align2::RIGHT_CENTER, format!("{}.", i + 1), FontId::monospace(13.5), t::TEXT3);
+                    painter.text(pos2(nr.right() + 8.0, y), Align2::LEFT_CENTER, c, FontId::monospace(13.5), t::FG);
+                    y += 20.0;
+                }
+                let g = painter.layout_job(job(&tf!("Klasör: {dir}", "Folder: {dir}"), reg(11.5), t::TEXT2, card.width() - 64.0));
+                painter.galley(pos2(x, y + 2.0), g, t::TEXT2);
+                let kx = painter.text(pos2(x, y + 30.0), Align2::LEFT_CENTER, "Enter", sb(11.5), t::KEY);
+                painter.text(pos2(kx.right() + 6.0, y + 30.0), Align2::LEFT_CENTER, enter_hint, reg(11.5), t::TEXT2);
+            } else if q.is_empty() {
+                painter.text(pos2(r.left() + 20.0, r.center().y), Align2::LEFT_CENTER, t!("Komutu '/' işaretinden sonra yazın (ör. /ipconfig) · Enter ile terminalde çalışır", "Type the command after '/' (e.g. /ipconfig) · Enter runs it in a terminal"), reg(13.0), t::TEXT3);
+            } else {
+                let card = Rect::from_min_size(pos2(r.left() + 12.0, r.top() + 6.0), vec2(r.width() - 24.0, 92.0));
+                let painter = painter.with_clip_rect(card.intersect(painter.clip_rect()));
+                painter.rect(card, CornerRadius::same(10), Color32::from_rgb(0x1b, 0x1e, 0x24), Stroke::new(1.0, Color32::from_rgb(0x34, 0x38, 0x40)), StrokeKind::Inside);
+                painter.rect_filled(Rect::from_min_max(pos2(card.left(), card.top() + 12.0), pos2(card.left() + 3.0, card.bottom() - 12.0)), CornerRadius::same(2), Color32::from_rgb(0xe8, 0xb0, 0x60));
+                paint_terminal(&painter, pos2(card.left() + 28.0, card.top() + 26.0), Color32::from_rgb(0xf3, 0xd2, 0x9a));
+                let x = card.left() + 48.0;
+                let pr = painter.text(pos2(x, card.top() + 26.0), Align2::LEFT_CENTER, "›", sb(16.0), Color32::from_rgb(0xe8, 0xb0, 0x60));
+                painter.text(pos2(pr.right() + 8.0, card.top() + 26.0), Align2::LEFT_CENTER, q, FontId::monospace(15.0), t::FG);
+                let g = painter.layout_job(job(&tf!("Klasör: {dir}", "Folder: {dir}"), reg(11.5), t::TEXT2, card.width() - 64.0));
+                painter.galley(pos2(x, card.top() + 44.0), g, t::TEXT2);
+                let kx = painter.text(pos2(x, card.top() + 72.0), Align2::LEFT_CENTER, "Enter", sb(11.5), t::KEY);
+                painter.text(pos2(kx.right() + 6.0, card.top() + 72.0), Align2::LEFT_CENTER, enter_hint, reg(11.5), t::TEXT2);
+            }
+        } else if !app.busy_waiting() && app.mode != Mode::Settings && !note_mode {
             let r = row_rect(&l, 0);
             painter.text(pos2(r.left() + 20.0, r.center().y), Align2::LEFT_CENTER, msg, reg(13.0), t::TEXT3);
         }
@@ -921,7 +988,7 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
         if it.path.is_empty() {
             continue; // yeni öğe yer tutucusu: boyut/tarih yok
         }
-        let (size_s, muted) = if it.is_dir { (t!("Klasör", "Folder").to_string(), true) } else { (util::fmt_size(it.size), false) };
+        let (size_s, muted) = if it.is_dir && !it.path.is_empty() && let Some(sz) = app.dirs.get(&it.path) { (util::fmt_size(sz), true) } else if it.is_dir { (t!("Klasör", "Folder").to_string(), true) } else { (util::fmt_size(it.size), false) };
         list_clip.text(pos2(meta_right, r.top() + 10.0), Align2::RIGHT_TOP, size_s, if muted { reg(11.5) } else { FontId::new(11.5, semi()) }, if muted { t::TEXT3 } else { t::META_SIZE });
         list_clip.text(pos2(meta_right, r.top() + 26.0), Align2::RIGHT_TOP, fmt_day(it.mtime), reg(11.5), t::TEXT2);
     }
@@ -1280,6 +1347,9 @@ pub fn draw(app: &mut App, ui: &mut Ui) {
                     crate::platform::hide(&ctx);
                 }
             }
+            if sec && mode_chip.is_some_and(|r| r.contains(p)) {
+                app.run(Act::CycleModeBack, &ctx);
+            }
             if sec && let Some(i) = row_hit {
                 app.cancel_edit();
                 if !app.is_marked(i) && !app.multi {
@@ -1349,7 +1419,10 @@ fn footer_hints(app: &App) -> Vec<(&'static str, &'static str)> {
                 return vec![("Ctrl+C", t!("Kopyala", "Copy")), ("Ctrl+X", t!("Kes", "Cut")), ("Del", t!("Sil", "Delete")), ("Tab", t!("İşlem", "Actions")), ("Esc", t!("Seçimi bırak", "Clear selection"))];
             }
             // sığmayan sondan düşer (Gezgin en sonda: sağ tık menüsünde de var)
-            vec![("Enter", t!("Aç", "Open")), ("Shift+Space", t!("Önizle", "Preview")), ("Tab", t!("İşlem", "Actions")), ("Ctrl+N", t!("Not", "Note")), ("Ctrl+T", "Terminal"), ("Alt+Enter", t!("Gezgin", "Explorer"))]
+            if app.is_cmd() {
+                return vec![("Enter", t!("Terminalde çalıştır", "Run in terminal")), ("Esc", t!("Çık", "Exit"))];
+            }
+            vec![("Enter", t!("Aç", "Open")), ("Shift+Space", t!("Önizle", "Preview")), ("Tab", t!("İşlem", "Actions")), ("Ctrl+1/2/3", t!("Sırala", "Sort")), ("Ctrl+N", t!("Not", "Note")), ("Ctrl+T", "Terminal"), ("Alt+Enter", t!("Gezgin", "Explorer"))]
         }
     }
 }
@@ -1374,6 +1447,7 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
                 app.settings_activate(k);
             }
             _ if matches!(app.mode, Mode::ExtInput { .. }) => app.commit_ext_input(true),
+            _ if app.is_cmd() => app.run_command(),
             _ if app.multi && app.marked.len() > 1 => app.run(Act::OpenAll, ctx),
             _ => app.run(Act::Open, ctx),
         },
@@ -1391,6 +1465,8 @@ fn hint_action(app: &mut App, k: &str, ctx: &egui::Context, l: &Layout) {
         "Ctrl+Sol" | "Ctrl+Left" => app.browse_up_pub(),
         "Ctrl+N" => app.run(Act::Note, ctx),
         "Ctrl+T" => app.run(Act::Terminal, ctx),
+        "Ctrl+1/2/3" => app.cycle_sort(),
+        "F1" => app.run(Act::CycleMode, ctx),
         "Ctrl+A" if app.mode == Mode::Search => app.run(Act::SelectAll, ctx),
         "Ctrl+S" => {
             if app.mode == Mode::Settings {

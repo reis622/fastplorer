@@ -6,6 +6,7 @@ mod i18n;
 mod app;
 mod bin;
 mod config;
+mod dirsize;
 mod index;
 mod notes;
 mod ops;
